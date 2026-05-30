@@ -1,0 +1,13 @@
+.build/
+dist/
+.tmp/
+node_modules/
+logs/
+*.pyc
+__pycache__/
+.cli/
+.agent/
+.claude/
+.project/
+tools/
+*.meta
