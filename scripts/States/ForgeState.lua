@@ -12,6 +12,13 @@ local ForgeState = {}
 local gameData_ = nil
 local onComplete_ = nil
 
+-- 音效
+local hammerSound_ = nil
+local quenchSound_ = nil
+local audioScene_ = nil
+local audioNode_ = nil
+local quenchSource_ = nil  -- 淬火循环音源（持续播放/停止）
+
 -- 锻造阶段
 local PHASE_HAMMER = 1   -- 锤击
 local PHASE_QUENCH = 2   -- 淬火
@@ -50,6 +57,21 @@ function ForgeState.Enter(gameData, onComplete)
     totalScore_ = 0
     finishTimer_ = -1
     
+    -- 预创建音频节点（避免首次播放延迟）
+    audioScene_ = Scene()
+    audioNode_ = audioScene_:CreateChild("ForgeSFX")
+    
+    -- 加载音效
+    hammerSound_ = cache:GetResource("Sound", "audio/sfx/forge_hammer_hit.ogg")
+    if hammerSound_ then
+        hammerSound_.looped = false
+    end
+    quenchSound_ = cache:GetResource("Sound", "audio/sfx/forge_quench_loop.ogg")
+    if quenchSound_ then
+        quenchSound_.looped = true
+    end
+    quenchSource_ = nil
+    
     -- 初始化锤击
     InitHammerPhase()
     
@@ -60,6 +82,15 @@ end
 function ForgeState.Leave()
     finishTimer_ = -1
     quenchHolding_ = false
+    StopQuenchSound()
+    if audioNode_ then
+        audioNode_:Remove()
+        audioNode_ = nil
+    end
+    if audioScene_ then
+        audioScene_:Dispose()
+        audioScene_ = nil
+    end
 end
 
 --- 初始化锤击阶段
@@ -264,6 +295,33 @@ function UpdateQuench(dt)
     end
 end
 
+--- 播放锤击音效
+function PlayHammerSound()
+    if not hammerSound_ or not audioNode_ then return end
+    local source = audioNode_:CreateComponent("SoundSource")
+    source.soundType = SOUND_EFFECT
+    source:Play(hammerSound_)
+    source.autoRemoveMode = REMOVE_COMPONENT
+end
+
+--- 开始播放淬火循环音效
+function StartQuenchSound()
+    if not quenchSound_ or not audioNode_ then return end
+    if quenchSource_ then return end  -- 已在播放
+    quenchSource_ = audioNode_:CreateComponent("SoundSource")
+    quenchSource_.soundType = SOUND_EFFECT
+    quenchSource_:Play(quenchSound_)
+end
+
+--- 停止淬火循环音效
+function StopQuenchSound()
+    if quenchSource_ then
+        quenchSource_:Stop()
+        quenchSource_:Remove()
+        quenchSource_ = nil
+    end
+end
+
 --- 处理玩家点击（锤击判定）
 function OnForgeInput()
     if finishTimer_ >= 0 then return end  -- 等待结束中忽略输入
@@ -278,20 +336,24 @@ function OnForgeInput()
                 hammerHits_ = hammerHits_ + 1
                 hammerNextBeat_ = hammerNextBeat_ + 1
                 hammerFlash_ = 1.0
+                PlayHammerSound()
             elseif diff <= Config.Forge.GoodWindow then
                 hammerHits_ = hammerHits_ + 0.7
                 hammerNextBeat_ = hammerNextBeat_ + 1
                 hammerFlash_ = 0.7
+                PlayHammerSound()
             end
         end
     elseif currentPhase_ == PHASE_QUENCH then
         quenchHolding_ = true
+        StartQuenchSound()
     end
 end
 
 function OnForgeInputRelease()
     if currentPhase_ == PHASE_QUENCH then
         quenchHolding_ = false
+        StopQuenchSound()
     end
 end
 

@@ -71,6 +71,9 @@ local combo_ = 0
 local comboTimer_ = 0
 local hitEffects_ = {}
 
+-- 木桩（永久靶子）
+local dummy_ = nil
+
 -- 主角贴图
 local playerImage_ = nil
 
@@ -258,23 +261,39 @@ function TrialState.Leave()
     end
 end
 
---- 生成平台
+--- 生成平台（多层复杂布局）
 function GeneratePlatforms()
     platforms_ = {}
     local pw = Config.Trial.PlatformWidth
     local ph = Config.Trial.PlatformHeight
-    local count = Config.Trial.PlatformCount
     
-    for i = 1, count do
-        local px = screenW_ * (0.2 + 0.6 * (i - 1) / (count - 1 + 0.001))
-        local py = groundY_ - 80 - (i % 2 == 0 and 60 or 0) - math.random(0, 30)
-        platforms_[#platforms_ + 1] = {
-            x = px - pw / 2,
-            y = py,
-            w = pw,
-            h = ph,
-        }
-    end
+    -- 第一层：地面上方低矮平台（左中右）
+    local layer1Y = groundY_ - 70
+    platforms_[#platforms_ + 1] = { x = screenW_ * 0.05, y = layer1Y, w = pw, h = ph }
+    platforms_[#platforms_ + 1] = { x = screenW_ * 0.42, y = layer1Y - 10, w = pw * 0.8, h = ph }
+    platforms_[#platforms_ + 1] = { x = screenW_ * 0.75, y = layer1Y + 5, w = pw, h = ph }
+    
+    -- 第二层：中间高度平台（错开分布）
+    local layer2Y = groundY_ - 145
+    platforms_[#platforms_ + 1] = { x = screenW_ * 0.15, y = layer2Y, w = pw * 1.1, h = ph }
+    platforms_[#platforms_ + 1] = { x = screenW_ * 0.55, y = layer2Y - 15, w = pw * 0.9, h = ph }
+    platforms_[#platforms_ + 1] = { x = screenW_ * 0.82, y = layer2Y + 10, w = pw * 0.7, h = ph }
+    
+    -- 第三层：高处小平台（跳跃挑战）
+    local layer3Y = groundY_ - 220
+    platforms_[#platforms_ + 1] = { x = screenW_ * 0.3, y = layer3Y, w = pw * 0.7, h = ph }
+    platforms_[#platforms_ + 1] = { x = screenW_ * 0.65, y = layer3Y - 10, w = pw * 0.7, h = ph }
+    
+    -- 初始化木桩（地面上，靠中间位置）
+    dummy_ = {
+        x = screenW_ * 0.6,
+        y = groundY_,
+        width = 20,
+        height = 60,
+        hitAnim = 0,       -- 受击闪动
+        hitDir = 0,        -- 受击方向
+        hp = 999,          -- 永远不会死
+    }
 end
 
 --- 生成靶子
@@ -450,7 +469,7 @@ end
 --- 玩家物理（横版重力）
 function UpdatePlayerPhysics(dt)
     local speed = Config.Trial.MoveSpeed
-    if attacking_ then speed = speed * 0.5 end
+    if attacking_ then speed = 0 end  -- 攻击时不能移动，避免惯性前冲
     
     if inputLeft_ then
         player_.vx = -speed
@@ -580,7 +599,8 @@ function CheckAttackCollision(progress)
                 local dy = t.y - originY
                 local dist = math.sqrt(dx * dx + dy * dy)
                 if dist < range + t.size / 2 then
-                    local inFront = (dir > 0 and dx > -20) or (dir < 0 and dx < 20)
+                    -- 判断目标是否在角色面朝方向的前方
+                    local inFront = (player_.facingRight and dx > -20) or (not player_.facingRight and dx < 20)
                     local vertOk = math.abs(dy) < range * 0.8
                     if inFront and vertOk then
                         HitTarget(i, t, atk, dir)
@@ -588,6 +608,54 @@ function CheckAttackCollision(progress)
                 end
             end
         end
+    end
+    
+    -- 检测木桩碰撞
+    CheckDummyCollision(progress)
+end
+
+--- 检测木桩碰撞
+function CheckDummyCollision(progress)
+    if not dummy_ or not currentAttack_ then return end
+    if dummy_.hitAnim > 0.5 then return end  -- 受击冷却中
+    
+    local atk = currentAttack_
+    local dir = player_.facingRight and 1 or -1
+    local originX = player_.x + player_.width / 2 + dir * 10
+    local originY = player_.y + player_.height * 0.4
+    local range = atk.range
+    
+    -- 木桩中心
+    local dCx = dummy_.x
+    local dCy = dummy_.y - dummy_.height / 2
+    local dRadius = dummy_.width / 2 + 10
+    
+    local hit = false
+    if atk.isThrust then
+        local thrustLen = GetThrustLength(progress)
+        local tipX = originX + dir * thrustLen
+        local dist = PointToSegmentDist(dCx, dCy, originX, originY, tipX, originY)
+        hit = dist < dRadius + 8
+    else
+        local dx = dCx - originX
+        local dy = dCy - originY
+        local dist = math.sqrt(dx * dx + dy * dy)
+        if dist < range + dRadius then
+            local inFront = (player_.facingRight and dx > -20) or (not player_.facingRight and dx < 20)
+            hit = inFront and math.abs(dy) < range * 0.8
+        end
+    end
+    
+    if hit then
+        dummy_.hitAnim = 1.0
+        dummy_.hitDir = dir
+        -- 命中特效
+        hitEffects_[#hitEffects_ + 1] = {
+            x = dCx, y = dCy,
+            text = "Hit!",
+            timer = 0.8,
+            color = {200, 200, 200},
+        }
     end
 end
 
@@ -653,6 +721,10 @@ function UpdateTargets(dt)
             t.knockX = t.knockX * 0.92
             t.knockY = t.knockY + dt * 200
         end
+    end
+    -- 木桩受击动画衰减
+    if dummy_ and dummy_.hitAnim > 0 then
+        dummy_.hitAnim = dummy_.hitAnim - dt * 3
     end
 end
 
@@ -796,6 +868,7 @@ function TrialState.Render(vg)
     RenderPlatforms(vg)
     RenderGround(vg)
     RenderTargets(vg)
+    RenderDummy(vg)
     RenderAttack(vg)
     RenderPlayer(vg)
     RenderHitEffects(vg)
@@ -903,6 +976,72 @@ function RenderTargets(vg)
     end
 end
 
+--- 渲染木桩
+function RenderDummy(vg)
+    if not dummy_ then return end
+    
+    local dx = dummy_.x
+    local dy = dummy_.y
+    local dw = dummy_.width
+    local dh = dummy_.height
+    
+    -- 受击晃动偏移
+    local shakeX = 0
+    if dummy_.hitAnim > 0 then
+        shakeX = math.sin(dummy_.hitAnim * 20) * 4 * dummy_.hitAnim * dummy_.hitDir
+    end
+    
+    -- 木桩主体（圆柱形木桩）
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, dx - dw / 2 + shakeX, dy - dh, dw, dh, 4)
+    nvgFillColor(vg, nvgRGBA(120, 85, 50, 240))
+    nvgFill(vg)
+    
+    -- 木纹
+    nvgStrokeColor(vg, nvgRGBA(90, 60, 35, 150))
+    nvgStrokeWidth(vg, 1)
+    for i = 1, 3 do
+        local ly = dy - dh * i / 4
+        nvgBeginPath(vg)
+        nvgMoveTo(vg, dx - dw / 2 + 3 + shakeX, ly)
+        nvgLineTo(vg, dx + dw / 2 - 3 + shakeX, ly)
+        nvgStroke(vg)
+    end
+    
+    -- 顶部横梁（靶标区域）
+    local armW = 36
+    local armH = 8
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, dx - armW / 2 + shakeX, dy - dh - armH / 2, armW, armH, 3)
+    nvgFillColor(vg, nvgRGBA(100, 70, 40, 240))
+    nvgFill(vg)
+    
+    -- 受击闪光
+    if dummy_.hitAnim > 0.5 then
+        local alpha = math.floor((dummy_.hitAnim - 0.5) * 2 * 200)
+        nvgBeginPath(vg)
+        nvgCircle(vg, dx + shakeX, dy - dh / 2, 20)
+        nvgFillColor(vg, nvgRGBA(255, 255, 200, alpha))
+        nvgFill(vg)
+    end
+    
+    -- 底座
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, dx - dw * 0.8 + shakeX, dy - 6, dw * 1.6, 6, 2)
+    nvgFillColor(vg, nvgRGBA(80, 60, 40, 240))
+    nvgFill(vg)
+    
+    -- 标签
+    local fontId = NVG.GetFont()
+    if fontId ~= -1 then
+        nvgFontFaceId(vg, fontId)
+        nvgFontSize(vg, 10)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
+        nvgFillColor(vg, nvgRGBA(180, 160, 140, 200))
+        nvgText(vg, dx + shakeX, dy - dh - 10, "木桩", nil)
+    end
+end
+
 --- 渲染攻击效果（使用玩家绘制的武器形状）
 function RenderAttack(vg)
     if not attacking_ or not currentAttack_ then return end
@@ -920,9 +1059,11 @@ function RenderAttack(vg)
         local tipX = originX + dir * len
         local tipY = originY
         
-        -- 渲染玩家绘制的武器形状（旋转90度作为刺击）
-        local weaponAngle = player_.facingRight and 0 or math.pi
-        RenderWeaponShape(vg, originX + dir * len * 0.5, originY, weaponAngle, wc, 0.8)
+        -- 渲染玩家绘制的武器形状（朝角色面朝方向水平刺出）
+        -- 尖端朝刺出方向：朝右+π/2，朝左-π/2；flipX 镜像形状
+        local weaponAngle = player_.facingRight and (math.pi / 2) or (-math.pi / 2)
+        local flipX = not player_.facingRight
+        RenderWeaponShape(vg, originX + dir * len * 0.5, originY, weaponAngle, wc, 0.8, flipX)
         
         -- 突刺轨迹线
         nvgBeginPath(vg)
@@ -944,10 +1085,16 @@ function RenderAttack(vg)
         local easedProgress = 1.0 - (1.0 - progress) * (1.0 - progress)
         local arcDir = (atk.direction or 1)
         local startAngle = math.rad(atk.startAngle or -60)
-        local sweep = math.rad(atk.arc) * arcDir * easedProgress
+        local sweepAngle = math.rad(atk.arc) * arcDir * easedProgress
         
-        local baseAngle = player_.facingRight and 0 or math.pi
-        local currentAngle = baseAngle + (startAngle + sweep) * dir
+        -- 角度计算：朝右时从startAngle开始顺时针扫；朝左时镜像
+        local currentAngle
+        if player_.facingRight then
+            currentAngle = startAngle + sweepAngle
+        else
+            -- 朝左时镜像：基础角度翻转到 pi 侧，扫动方向反转
+            currentAngle = math.pi - (startAngle + sweepAngle)
+        end
         
         local tipX = originX + math.cos(currentAngle) * range
         local tipY = originY + math.sin(currentAngle) * range
@@ -959,18 +1106,25 @@ function RenderAttack(vg)
         local steps = 10
         for s = 0, steps do
             local t = easedProgress * s / steps
-            local a = baseAngle + (startAngle + math.rad(atk.arc) * arcDir * t) * dir
+            local a
+            if player_.facingRight then
+                a = startAngle + math.rad(atk.arc) * arcDir * t
+            else
+                a = math.pi - (startAngle + math.rad(atk.arc) * arcDir * t)
+            end
             nvgLineTo(vg, originX + math.cos(a) * range, originY + math.sin(a) * range)
         end
         nvgClosePath(vg)
         nvgFillColor(vg, nvgRGBA(wc[1], wc[2], wc[3], trailAlpha))
         nvgFill(vg)
         
-        -- 渲染玩家绘制的武器形状（在尖端位置，朝攻击方向旋转）
-        local weaponAngle = currentAngle - math.pi / 2  -- 武器尖端朝外
+        -- 渲染玩家绘制的武器形状（在挥动路径上，刃面朝外、柄面朝自己）
+        -- +π/2 保证刃端沿 currentAngle 方向朝外；朝左时 X 轴翻转实现镜像
+        local weaponAngle = currentAngle + math.pi / 2
         local weaponX = originX + math.cos(currentAngle) * range * 0.6
         local weaponY = originY + math.sin(currentAngle) * range * 0.6
-        RenderWeaponShape(vg, weaponX, weaponY, weaponAngle, wc, 1.0)
+        local flipX = not player_.facingRight
+        RenderWeaponShape(vg, weaponX, weaponY, weaponAngle, wc, 1.0, flipX)
         
         -- 刃尖光芒
         local glowAlpha = math.floor(180 * (1 - progress))
@@ -988,7 +1142,7 @@ end
 --- @param angle number 旋转角度（弧度）
 --- @param color table 颜色 {r, g, b}
 --- @param scale number 额外缩放
-function RenderWeaponShape(vg, cx, cy, angle, color, scale)
+function RenderWeaponShape(vg, cx, cy, angle, color, scale, flipX)
     if #weaponStrokes_ == 0 then
         -- 无笔画时：渲染默认武器线条
         RenderDefaultWeapon(vg, cx, cy, angle, color)
@@ -998,7 +1152,12 @@ function RenderWeaponShape(vg, cx, cy, angle, color, scale)
     nvgSave(vg)
     nvgTranslate(vg, cx, cy)
     nvgRotate(vg, angle)
-    nvgScale(vg, scale, scale)
+    -- flipX 时翻转 X 轴实现镜像（朝左时刃面朝外）
+    if flipX then
+        nvgScale(vg, -scale, scale)
+    else
+        nvgScale(vg, scale, scale)
+    end
     
     -- 渲染所有笔画
     for i = 1, #weaponStrokes_ do
@@ -1069,7 +1228,8 @@ function RenderPlayer(vg)
     
     if playerImage_ and playerImage_ ~= 0 then
         nvgSave(vg)
-        if not player_.facingRight then
+        if player_.facingRight then
+            -- 贴图默认朝左，朝右时水平翻转
             nvgTranslate(vg, px + pw, py)
             nvgScale(vg, -1, 1)
         else
@@ -1138,7 +1298,7 @@ function RenderCombo(vg)
     
     local alpha = math.floor(255 * math.max(0, 1.0 - comboTimer_ / Config.Trial.ComboDecayTime))
     nvgFillColor(vg, nvgRGBA(255, 200, 50, alpha))
-    nvgText(vg, screenW_ / 2, 45, combo_ .. " COMBO!", nil)
+    nvgText(vg, screenW_ / 2, 90, combo_ .. " COMBO!", nil)
 end
 
 --- 变形特效渲染

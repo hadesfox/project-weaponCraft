@@ -60,11 +60,14 @@ function Analyzer.Analyze(strokes)
     result.isComposite = DetectComposite(strokes, result)
     
     -- 武器类型识别
-    result.type = ClassifyWeapon(result)
+    result.type = ClassifyWeapon(result, strokes)
     
+    local wr, ws = ComputeWidthProfile(strokes)
     print("[Analyzer] Type: " .. result.type 
         .. " | Strokes: " .. #strokes
         .. " | AR: " .. string.format("%.2f", result.aspectRatio)
+        .. " | WR: " .. string.format("%.1f", wr)
+        .. " | WS: " .. string.format("%.2f", ws)
         .. " | Points: " .. result.pointCount
         .. " | Closed: " .. result.closedCount
         .. " | Composite: " .. tostring(result.isComposite))
@@ -177,31 +180,102 @@ function AreStrokesConnected(strokeA, strokeB)
     return false
 end
 
+--- 分析形状的宽度分布特征（用于区分斧和剑）
+--- 将形状按高度切成若干水平带，统计每带的宽度
+--- 返回: widthRatio（最大宽/最小宽）, wideSpan（宽区域占比）
+function ComputeWidthProfile(strokes)
+    if not strokes or #strokes == 0 then return 1.0, 0 end
+    -- 收集所有点
+    local allPts = {}
+    local minY, maxY = math.huge, -math.huge
+    for _, stroke in ipairs(strokes) do
+        for _, p in ipairs(stroke.points) do
+            allPts[#allPts + 1] = p
+            minY = math.min(minY, p.y)
+            maxY = math.max(maxY, p.y)
+        end
+    end
+    if #allPts < 3 then return 1.0, 0 end
+    local totalH = maxY - minY
+    if totalH < 1 then return 1.0, 0 end
+
+    -- 将形状分成 8 个水平带，计算每带的 X 跨度
+    local numBands = 8
+    local bandH = totalH / numBands
+    local bandWidths = {}
+    for b = 1, numBands do
+        local bMinY = minY + (b - 1) * bandH
+        local bMaxY = minY + b * bandH
+        local bMinX, bMaxX = math.huge, -math.huge
+        local hasPoints = false
+        for _, p in ipairs(allPts) do
+            if p.y >= bMinY and p.y <= bMaxY then
+                bMinX = math.min(bMinX, p.x)
+                bMaxX = math.max(bMaxX, p.x)
+                hasPoints = true
+            end
+        end
+        if hasPoints and bMaxX > bMinX then
+            bandWidths[#bandWidths + 1] = bMaxX - bMinX
+        else
+            bandWidths[#bandWidths + 1] = 0
+        end
+    end
+
+    -- 找最大宽度和最小非零宽度
+    local maxW = 0
+    local minW = math.huge
+    for _, w in ipairs(bandWidths) do
+        if w > maxW then maxW = w end
+        if w > 0 and w < minW then minW = w end
+    end
+    if minW == math.huge or minW < 1 then minW = 1 end
+    local widthRatio = maxW / minW
+
+    -- 计算"宽区域占比"：宽度超过最大宽度 40% 的带数 / 总带数
+    local wideCount = 0
+    local threshold = maxW * 0.4
+    for _, w in ipairs(bandWidths) do
+        if w >= threshold then
+            wideCount = wideCount + 1
+        end
+    end
+    local wideSpan = wideCount / numBands
+
+    return widthRatio, wideSpan
+end
+
 --- 根据特征分类武器类型
-function ClassifyWeapon(result)
+function ClassifyWeapon(result, strokes)
     local ar = result.aspectRatio
     local sharp = result.pointCount
     local closed = result.closedCount
-    local strokes = result.shapeCount
+    local strokeCount = result.shapeCount
+    local widthRatio, wideSpan = ComputeWidthProfile(strokes)
+    
+    result.widthRatio = widthRatio
+    result.wideSpan = wideSpan
     
     -- 圆盾：高闭合率 + 接近正方形比例
-    if closed >= 1 and ar > 0.7 and ar < 1.4 and strokes <= 2 then
+    if closed >= 1 and ar > 0.7 and ar < 1.4 and strokeCount <= 2 then
         return "SHIELD"
     end
     
-    -- 矛/枪：极高纵横比
-    if ar > 3.0 and sharp <= 2 then
+    -- 斧：宽度变化大 + 宽区域占较大比例（斧刃覆盖相当高度）
+    -- widthRatio > 3: 最宽处比最窄处宽 3 倍以上
+    -- wideSpan > 0.3: 超过 30% 的高度是"宽"的（区别于剑的护手只占一小段）
+    if widthRatio > 3.0 and wideSpan > 0.3 and ar > 0.8 and ar < 3.5 then
+        return "AXE"
+    end
+    
+    -- 矛/枪：极高纵横比 + 很窄（宽度变化小）
+    if ar > 4.0 and sharp <= 2 then
         return "SPEAR"
     end
     
     -- 剑：高纵横比 + 尖端
     if ar > 1.8 and sharp >= 1 then
         return "SWORD"
-    end
-    
-    -- 斧：中等比例 + 有宽面
-    if ar > 0.8 and ar < 2.0 and strokes >= 2 then
-        return "AXE"
     end
     
     -- 钩：有明显弯曲

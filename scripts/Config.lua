@@ -68,9 +68,9 @@ Config.Trial = {
     GroundY = 0.82,            -- 地面 Y 位置（屏幕比例）
     
     -- 平台
-    PlatformCount = 3,         -- 平台数量
-    PlatformWidth = 100,       -- 平台宽度
-    PlatformHeight = 12,       -- 平台厚度
+    PlatformCount = 8,         -- 平台数量
+    PlatformWidth = 90,        -- 平台宽度
+    PlatformHeight = 10,       -- 平台厚度
     
     -- 主角图片
     PlayerImage = "image/主角_锻造师_20260530003547.png",
