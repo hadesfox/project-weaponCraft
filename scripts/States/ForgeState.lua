@@ -42,6 +42,7 @@ local hammerDone_ = false    -- 锤击是否已完成（等待展示结果）
 local hammerResultTimer_ = 0 -- 锤击结果展示倒计时
 local hammerScore_ = 0       -- 锤击阶段得分（用于展示）
 local hammerTimeLeft_ = 0    -- 锤击阶段剩余时间
+local hammerZoneCenter_ = 0  -- 判定区域中心位置（-1~1范围内随机）
 local HAMMER_RESULT_DURATION = 1.0  -- 锤击结果展示时间（秒）
 
 -- 淬火阶段变量
@@ -118,6 +119,17 @@ function ForgeState.Leave()
     end
 end
 
+--- 随机生成判定区域位置
+--- 区域结构：perfect(10%) + good两侧(30%) = 40%，需确保全部在[-1,1]内
+local PERFECT_HALF = 0.10   -- perfect区半宽（10%/2=5%，映射到±1范围=0.10）
+local GOOD_HALF = 0.40      -- good区半宽（含perfect，(10%+30%)/2=20%，映射=0.40）
+local ZONE_MARGIN = 0.40    -- 区域中心离边缘最小距离
+
+local function RandomizeZoneCenter()
+    -- 区域中心范围：[-0.60, 0.60]
+    hammerZoneCenter_ = (math.random() * 2 - 1) * (1.0 - ZONE_MARGIN)
+end
+
 --- 初始化锤击阶段
 InitHammerPhase = function()
     hammerHits_ = 0
@@ -132,6 +144,7 @@ InitHammerPhase = function()
     hammerScore_ = 0
     hammerTimeLeft_ = Config.Forge.HammerDuration
     phaseTimer_ = 0
+    RandomizeZoneCenter()
     
     print("[Forge/Hammer] Ready for " .. HAMMER_MAX_HITS .. " strikes, time limit: " .. Config.Forge.HammerDuration .. "s")
 end
@@ -238,7 +251,7 @@ FinalizeHammer = function()
             local q = hammerHitQuality_[i]
             if q == "perfect" then totalQuality = totalQuality + 100
             elseif q == "good" then totalQuality = totalQuality + 70
-            else totalQuality = totalQuality + 40
+            else totalQuality = totalQuality + 20  -- miss: 很低分
             end
         end
         -- 基础质量分 × 完成率
@@ -299,20 +312,19 @@ UpdateHammer = function(dt)
 end
 
 --- 评估锤击时机质量
---- 节奏指示器在0~1间循环，"最佳击打区"在0.45~0.55中心区域
+--- rhythmPos = sin(...) 范围 -1~1，光标位置：0=中心，±1=边缘
+--- 黄色中心 = perfect，灰色中间 = good，黑色边缘 = miss
 ---@diagnostic disable-next-line: redefined-local
 EvaluateHammerTiming = function()
-    -- 将 0~1 映射为摆动位置: 用 sin 得到 -1~1 的值
-    local pos = math.sin(hammerRhythm_ * math.pi * 2)
-    -- pos 接近 1.0 时为最佳击打时机（指示器在顶部/中心）
-    local absPos = math.abs(pos)
+    local pos = math.sin(hammerRhythm_ * math.pi * 2)  -- 光标位置 -1~1
+    local dist = math.abs(pos - hammerZoneCenter_)      -- 离区域中心的距离
     
-    if absPos >= 0.85 then
-        return "perfect"
-    elseif absPos >= 0.55 then
-        return "good"
+    if dist <= PERFECT_HALF then
+        return "perfect"   -- 光标在黄色区域(10%)
+    elseif dist <= GOOD_HALF then
+        return "good"      -- 光标在灰色区域(30%)
     else
-        return "ok"
+        return "miss"      -- 光标在黑色区域(60%)
     end
 end
 
@@ -437,8 +449,9 @@ OnForgeInput = function()
                 hammerFlash_ = 0.7
                 hammerShake_ = 0.7
             else
-                hammerFlash_ = 0.4
-                hammerShake_ = 0.4
+                -- miss: 微弱反馈
+                hammerFlash_ = 0.3
+                hammerShake_ = 0.2
             end
             
             -- 短暂冷却防止连点
@@ -613,46 +626,47 @@ RenderHammerPhase = function(vg, w, h)
     nvgStrokeWidth(vg, 1.5)
     nvgStroke(vg)
     
-    -- 最佳击打区域（中间高亮带）- 对应 |sin| >= 0.85 → 约中间15%
-    local perfectZoneW = barW * 0.15
-    local perfectZoneX = cx - perfectZoneW / 2
+    -- 区域中心在进度条上的像素位置
+    local zoneCenterX = cx + hammerZoneCenter_ * (barW / 2 - 6)
+    
+    -- 一般区域（灰色，good区宽度=30%，加上perfect共40%）
+    local goodZonePixelW = GOOD_HALF * 2 * (barW / 2 - 6)
     nvgBeginPath(vg)
-    nvgRoundedRect(vg, perfectZoneX, barY + 2, perfectZoneW, barH - 4, 4)
-    nvgFillColor(vg, nvgRGBA(255, 200, 50, 60))
+    nvgRoundedRect(vg, zoneCenterX - goodZonePixelW / 2, barY + 2, goodZonePixelW, barH - 4, 4)
+    nvgFillColor(vg, nvgRGBA(120, 120, 140, 50))
     nvgFill(vg)
-    nvgStrokeColor(vg, nvgRGBA(255, 200, 50, 180))
+    
+    -- 最佳击打区域（黄色，perfect区宽度=10%）
+    local perfectZonePixelW = PERFECT_HALF * 2 * (barW / 2 - 6)
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, zoneCenterX - perfectZonePixelW / 2, barY + 2, perfectZonePixelW, barH - 4, 4)
+    nvgFillColor(vg, nvgRGBA(255, 200, 50, 100))
+    nvgFill(vg)
+    nvgStrokeColor(vg, nvgRGBA(255, 200, 50, 200))
     nvgStrokeWidth(vg, 1)
     nvgStroke(vg)
     
-    -- 好区域（对应 |sin| >= 0.55）约中间40%
-    local goodZoneW = barW * 0.40
-    local goodZoneX = cx - goodZoneW / 2
-    nvgBeginPath(vg)
-    nvgRoundedRect(vg, goodZoneX, barY + 2, goodZoneW, barH - 4, 4)
-    nvgFillColor(vg, nvgRGBA(100, 200, 100, 25))
-    nvgFill(vg)
-    
     -- 移动光标（rhythmPos 从 -1~1 映射到 barX ~ barX+barW）
     local cursorX = cx + rhythmPos * (barW / 2 - 6)
-    local cursorGlow = math.abs(rhythmPos)  -- 越靠近中间越亮
+    local distToZone = math.abs(rhythmPos - hammerZoneCenter_)  -- 离区域中心距离
     
-    -- 光标发光
-    if cursorGlow >= 0.85 then
+    -- 光标发光（在perfect区内时发光）
+    if distToZone <= PERFECT_HALF then
         nvgBeginPath(vg)
         nvgCircle(vg, cursorX, barY + barH / 2, 14)
         nvgFillColor(vg, nvgRGBA(255, 200, 50, 50))
         nvgFill(vg)
     end
     
-    -- 光标本体
+    -- 光标本体（黄色=perfect区，灰色=good区，暗色=miss区）
     nvgBeginPath(vg)
     nvgCircle(vg, cursorX, barY + barH / 2, 8)
-    if cursorGlow >= 0.85 then
-        nvgFillColor(vg, nvgRGBA(255, 220, 50, 255))
-    elseif cursorGlow >= 0.55 then
-        nvgFillColor(vg, nvgRGBA(150, 220, 100, 255))
+    if distToZone <= PERFECT_HALF then
+        nvgFillColor(vg, nvgRGBA(255, 220, 50, 255))   -- 黄色 = perfect 区
+    elseif distToZone <= GOOD_HALF then
+        nvgFillColor(vg, nvgRGBA(150, 150, 170, 255))   -- 灰色 = good 区
     else
-        nvgFillColor(vg, nvgRGBA(150, 150, 170, 255))
+        nvgFillColor(vg, nvgRGBA(60, 60, 70, 255))      -- 黑色 = miss 区
     end
     nvgFill(vg)
     nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 200))
@@ -680,11 +694,11 @@ RenderHammerPhase = function(vg, w, h)
             -- 已完成 - 颜色根据质量
             local q = hammerHitQuality_[i]
             if q == "perfect" then
-                nvgFillColor(vg, nvgRGBA(255, 220, 50, 255))
+                nvgFillColor(vg, nvgRGBA(80, 220, 100, 255))   -- 绿色
             elseif q == "good" then
-                nvgFillColor(vg, nvgRGBA(100, 220, 100, 255))
+                nvgFillColor(vg, nvgRGBA(150, 150, 170, 255))  -- 灰色
             else
-                nvgFillColor(vg, nvgRGBA(150, 150, 170, 255))
+                nvgFillColor(vg, nvgRGBA(200, 60, 60, 255))    -- 红色(失误)
             end
         else
             -- 未完成
@@ -786,11 +800,11 @@ RenderHammerPhase = function(vg, w, h)
             qText = "完美!"
             qr, qg, qb = 255, 220, 50
         elseif lastQ == "good" then
-            qText = "不错!"
-            qr, qg, qb = 100, 220, 100
-        else
-            qText = "一般"
+            qText = "不错"
             qr, qg, qb = 150, 150, 170
+        else
+            qText = "失误!"
+            qr, qg, qb = 200, 60, 60
         end
         nvgFontSize(vg, 18)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)

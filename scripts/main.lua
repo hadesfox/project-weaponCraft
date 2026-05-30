@@ -221,6 +221,7 @@ end
 function SubscribeToEvents()
     SubscribeToEvent("Update", "HandleUpdate")
     SubscribeToEvent("KeyDown", "HandleKeyDown")
+    SubscribeToEvent("KeyUp", "HandleKeyUp")
     SubscribeToEvent("MouseButtonDown", "HandleMouseDown")
     SubscribeToEvent("MouseButtonUp", "HandleMouseUp")
     SubscribeToEvent("MouseMove", "HandleMouseMove")
@@ -246,6 +247,12 @@ function HandleKeyDown(eventType, eventData)
     local key = eventData["Key"]:GetInt()
     local mod = GetActiveModule()
     if mod then mod.OnKeyDown(key) end
+end
+
+function HandleKeyUp(eventType, eventData)
+    local key = eventData["Key"]:GetInt()
+    local mod = GetActiveModule()
+    if mod and mod.OnKeyUp then mod.OnKeyUp(key) end
 end
 
 function HandleMouseDown(eventType, eventData)

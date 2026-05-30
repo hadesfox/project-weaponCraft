@@ -41,7 +41,7 @@ Config.WeaponTypes = {
 
 -- 锻造配置
 Config.Forge = {
-    HammerDuration = 8.0,    -- 锤击阶段时长（秒）
+    HammerDuration = 10.0,   -- 锤击阶段时长（秒）
     QuenchDuration = 5.0,    -- 淬火阶段时长（秒）
     HammerBeatInterval = 0.8, -- 锤击节拍间隔
     PerfectWindow = 0.15,    -- 完美判定窗口（秒）

@@ -8,6 +8,7 @@
 local UI = require("urhox-libs/UI")
 local Config = require("Config")
 local NVG = require("NVG")
+local Slime = require("Trial.Slime")
 
 local TrialState = {}
 
@@ -196,6 +197,9 @@ function TrialState.Enter(gameData, onComplete)
     GeneratePlatforms()
     SpawnTargets()
     
+    -- 初始化史莱姆
+    Slime.Init(screenW_, screenH_, groundY_, physScale_)
+    
     local weaponType = gameData_.weaponData and gameData_.weaponData.type or "UNKNOWN"
     print("[TrialState] Entered. Weapon: " .. weaponType .. " Composite: " .. tostring(isComposite_))
 end
@@ -338,6 +342,8 @@ function TrialState.Leave()
         end
     end
     playerRunFrames_ = {}
+    -- 释放史莱姆
+    Slime.Shutdown()
 end
 
 --- 生成平台（多层复杂布局）
@@ -571,6 +577,7 @@ function TrialState.Update(dt)
     UpdatePlayerPhysics(dt)
     UpdateAttack(dt)
     UpdateTargets(dt)
+    Slime.Update(dt, player_)
     UpdateCombo(dt)
     UpdateHitEffects(dt)
     UpdateTransformAnim(dt)
@@ -1051,6 +1058,8 @@ function TrialState.Render(vg)
             if player_.y + player_.height > groundY_ then
                 player_.y = groundY_ - player_.height
             end
+            -- 史莱姆适配
+            Slime.OnResize(screenW_, screenH_, groundY_, physScale_)
         end
     end
     
@@ -1063,7 +1072,7 @@ function TrialState.Render(vg)
     RenderTargets(vg)
     RenderDummy(vg)
     RenderAttack(vg)
-    RenderPlayer(vg)
+    Slime.Render(vg, player_)
     RenderHitEffects(vg)
     RenderCombo(vg)
     RenderTransformEffect(vg)

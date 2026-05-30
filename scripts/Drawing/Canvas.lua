@@ -51,9 +51,17 @@ function Canvas.Clear()
     isDrawing_ = false
 end
 
---- 加载模板笔画
+--- 加载模板笔画（深拷贝，不修改原模板）
 function Canvas.LoadTemplate(templateStrokes)
-    strokes_ = templateStrokes
+    strokes_ = {}
+    for i = 1, #templateStrokes do
+        local src = templateStrokes[i]
+        local copy = { closed = src.closed, points = {} }
+        for j = 1, #src.points do
+            copy.points[j] = { x = src.points[j].x, y = src.points[j].y }
+        end
+        strokes_[i] = copy
+    end
     currentStroke_ = nil
     isDrawing_ = false
 end
