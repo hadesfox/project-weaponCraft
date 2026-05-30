@@ -93,6 +93,44 @@ local FRAME_DURATION = 0.10    -- 每帧持续时间(秒)
 -- UI 引用
 local uiRoot_ = nil
 
+-- 内部函数前向声明
+local PrepareWeaponStrokes
+local SetupTransformSystem
+local GetComplementaryType
+local DoTransform
+local GeneratePlatforms
+local RecalcPlatforms
+local SpawnTargets
+local RecalcTargets
+local UpdateInput
+local UpdatePlayerPhysics
+local DoJump
+local StartAttack
+local UpdateAttack
+local CheckAttackCollision
+local CheckDummyCollision
+local GetThrustLength
+local HitTarget
+local PointToSegmentDist
+local UpdateTargets
+local UpdateCombo
+local UpdateHitEffects
+local UpdateTransformAnim
+local CheckWaveClear
+local UpdateHUD
+local RenderBackground
+local RenderGround
+local RenderPlatforms
+local RenderTargets
+local RenderDummy
+local RenderAttack
+local RenderWeaponShape
+local RenderDefaultWeapon
+local RenderPlayer
+local RenderHitEffects
+local RenderCombo
+local RenderTransformEffect
+
 --- 进入试炼状态
 function TrialState.Enter(gameData, onComplete)
     gameData_ = gameData
@@ -163,7 +201,7 @@ function TrialState.Enter(gameData, onComplete)
 end
 
 --- 准备武器笔画（归一化到以原点为中心的坐标）
-function PrepareWeaponStrokes()
+PrepareWeaponStrokes = function()
     weaponStrokes_ = {}
     
     local strokes = gameData_.strokes
@@ -218,7 +256,7 @@ function PrepareWeaponStrokes()
 end
 
 --- 设置变形系统
-function SetupTransformSystem()
+SetupTransformSystem = function()
     local weaponType = gameData_.weaponData and gameData_.weaponData.type or "UNKNOWN"
     isComposite_ = gameData_.weaponData and gameData_.weaponData.isComposite or false
     currentForm_ = 1
@@ -251,7 +289,7 @@ function SetupTransformSystem()
 end
 
 --- 根据主武器类型获取互补类型
-function GetComplementaryType(primary)
+GetComplementaryType = function(primary)
     local mapping = {
         SWORD = "SHIELD",
         AXE = "HOOK",
@@ -264,7 +302,7 @@ function GetComplementaryType(primary)
 end
 
 --- 执行变形
-function DoTransform()
+DoTransform = function()
     if not isComposite_ then return end
     if attacking_ then return end  -- 攻击中不可变形
     
@@ -303,7 +341,7 @@ function TrialState.Leave()
 end
 
 --- 生成平台（多层复杂布局）
-function GeneratePlatforms()
+GeneratePlatforms = function()
     -- 平台使用比例坐标存储，渲染/物理时实时计算实际位置
     -- rx: X占屏幕宽比例, ry: Y相对地面的比例(0=地面, 1=屏幕顶部), rw: 宽度占屏幕宽比例
     platformDefs_ = {}
@@ -330,7 +368,7 @@ function GeneratePlatforms()
 end
 
 --- 根据当前屏幕尺寸重算平台、木桩实际坐标
-function RecalcPlatforms()
+RecalcPlatforms = function()
     platforms_ = {}
     local ph = Config.Trial.PlatformHeight
     local arenaH = groundY_  -- 地面以上的可用高度
@@ -358,7 +396,7 @@ function RecalcPlatforms()
 end
 
 --- 生成靶子（使用比例坐标）
-function SpawnTargets()
+SpawnTargets = function()
     targets_ = {}
     targetDefs_ = {}
     local arenaH = groundY_
@@ -389,7 +427,7 @@ function SpawnTargets()
 end
 
 --- 根据屏幕尺寸重算靶子位置和大小
-function RecalcTargets()
+RecalcTargets = function()
     if not targetDefs_ then return end
     local arenaH = groundY_
     for i = 1, #targetDefs_ do
@@ -541,13 +579,13 @@ function TrialState.Update(dt)
 end
 
 --- 读取输入状态
-function UpdateInput()
+UpdateInput = function()
     inputLeft_ = input:GetKeyDown(KEY_A) or input:GetKeyDown(KEY_LEFT)
     inputRight_ = input:GetKeyDown(KEY_D) or input:GetKeyDown(KEY_RIGHT)
 end
 
 --- 玩家物理（横版重力）
-function UpdatePlayerPhysics(dt)
+UpdatePlayerPhysics = function(dt)
     local speed = Config.Trial.MoveSpeed * physScale_
     if attacking_ then speed = 0 end  -- 攻击时不能移动，避免惯性前冲
     
@@ -579,14 +617,16 @@ function UpdatePlayerPhysics(dt)
         player_.onGround = true
     end
     
-    -- 平台碰撞（仅下落时）
+    -- 平台碰撞（仅下落时或静止站立时）
     if player_.vy >= 0 then
         for i = 1, #platforms_ do
             local p = platforms_[i]
             local playerBottom = player_.y + player_.height
             local prevBottom = playerBottom - player_.vy * dt
             if player_.x + player_.width > p.x and player_.x < p.x + p.w then
-                if prevBottom <= p.y + 2 and playerBottom >= p.y then
+                -- 使用容差 -1 避免浮点精度导致的振动
+                -- (snap 后 p.y - height + height 可能不精确等于 p.y)
+                if prevBottom <= p.y + 2 and playerBottom >= p.y - 1 then
                     player_.y = p.y - player_.height
                     player_.vy = 0
                     player_.onGround = true
@@ -650,7 +690,7 @@ function UpdatePlayerPhysics(dt)
 end
 
 --- 跳跃
-function DoJump()
+DoJump = function()
     if player_.onGround then
         player_.vy = Config.Trial.JumpVelocity * physScale_
         player_.onGround = false
@@ -659,7 +699,7 @@ function DoJump()
 end
 
 --- 发起攻击
-function StartAttack()
+StartAttack = function()
     if attacking_ then return end
     if #attacks_ == 0 then return end
     
@@ -674,7 +714,7 @@ function StartAttack()
 end
 
 --- 攻击更新
-function UpdateAttack(dt)
+UpdateAttack = function(dt)
     if not attacking_ then return end
     
     attackTimer_ = attackTimer_ + dt
@@ -698,7 +738,7 @@ function UpdateAttack(dt)
 end
 
 --- 碰撞检测
-function CheckAttackCollision(progress)
+CheckAttackCollision = function(progress)
     if not currentAttack_ then return end
     
     local atk = currentAttack_
@@ -746,7 +786,7 @@ function CheckAttackCollision(progress)
 end
 
 --- 检测木桩碰撞
-function CheckDummyCollision(progress)
+CheckDummyCollision = function(progress)
     if not dummy_ or not currentAttack_ then return end
     if dummy_.hitAnim > 0.5 then return end  -- 受击冷却中
     
@@ -791,7 +831,7 @@ function CheckDummyCollision(progress)
 end
 
 --- 突刺延伸长度
-function GetThrustLength(progress)
+GetThrustLength = function(progress)
     if not currentAttack_ then return 60 * physScale_ end
     local len = currentAttack_.range * physScale_
     if progress < 0.3 then
@@ -804,7 +844,7 @@ function GetThrustLength(progress)
 end
 
 --- 命中靶子
-function HitTarget(index, target, atk, dir)
+HitTarget = function(index, target, atk, dir)
     attackHitTargets_[index] = true
     target.alive = false
     target.hitAnim = 1.0
@@ -827,7 +867,7 @@ function HitTarget(index, target, atk, dir)
 end
 
 --- 点到线段距离
-function PointToSegmentDist(px, py, ax, ay, bx, by)
+PointToSegmentDist = function(px, py, ax, ay, bx, by)
     local abx = bx - ax
     local aby = by - ay
     local apx = px - ax
@@ -841,7 +881,7 @@ function PointToSegmentDist(px, py, ax, ay, bx, by)
 end
 
 --- 靶子动画更新
-function UpdateTargets(dt)
+UpdateTargets = function(dt)
     for i = 1, #targets_ do
         local t = targets_[i]
         if t.spawnAnim > 0 then
@@ -860,7 +900,7 @@ function UpdateTargets(dt)
 end
 
 --- 连击衰减
-function UpdateCombo(dt)
+UpdateCombo = function(dt)
     if combo_ > 0 then
         comboTimer_ = comboTimer_ + dt
         if comboTimer_ >= Config.Trial.ComboDecayTime then
@@ -871,7 +911,7 @@ function UpdateCombo(dt)
 end
 
 --- 命中特效更新
-function UpdateHitEffects(dt)
+UpdateHitEffects = function(dt)
     local i = 1
     while i <= #hitEffects_ do
         hitEffects_[i].timer = hitEffects_[i].timer - dt
@@ -885,14 +925,14 @@ function UpdateHitEffects(dt)
 end
 
 --- 变形动画更新
-function UpdateTransformAnim(dt)
+UpdateTransformAnim = function(dt)
     if transformAnim_ > 0 then
         transformAnim_ = math.max(0, transformAnim_ - dt * 3)
     end
 end
 
 --- 检查波次清场
-function CheckWaveClear()
+CheckWaveClear = function()
     for i = 1, #targets_ do
         if targets_[i].alive then return end
     end
@@ -907,7 +947,7 @@ function CheckWaveClear()
 end
 
 --- 更新 HUD 标签
-function UpdateHUD()
+UpdateHUD = function()
     if not uiRoot_ then return end
     
     local scoreLabel = uiRoot_:FindById("trialScoreLabel")
@@ -1033,7 +1073,7 @@ function TrialState.Render(vg)
 end
 
 --- 背景渐变
-function RenderBackground(vg)
+RenderBackground = function(vg)
     local bgPaint = nvgLinearGradient(vg, 0, 0, 0, screenH_,
         nvgRGBA(30, 35, 60, 255),
         nvgRGBA(60, 50, 80, 255))
@@ -1054,7 +1094,7 @@ function RenderBackground(vg)
 end
 
 --- 地面
-function RenderGround(vg)
+RenderGround = function(vg)
     local groundPaint = nvgLinearGradient(vg, 0, groundY_, 0, screenH_,
         nvgRGBA(60, 80, 50, 255),
         nvgRGBA(40, 55, 35, 255))
@@ -1072,7 +1112,7 @@ function RenderGround(vg)
 end
 
 --- 平台
-function RenderPlatforms(vg)
+RenderPlatforms = function(vg)
     for i = 1, #platforms_ do
         local p = platforms_[i]
         nvgBeginPath(vg)
@@ -1089,7 +1129,7 @@ function RenderPlatforms(vg)
 end
 
 --- 渲染靶子
-function RenderTargets(vg)
+RenderTargets = function(vg)
     for i = 1, #targets_ do
         local t = targets_[i]
         local tx = t.x + t.knockX
@@ -1130,7 +1170,7 @@ function RenderTargets(vg)
 end
 
 --- 渲染木桩
-function RenderDummy(vg)
+RenderDummy = function(vg)
     if not dummy_ then return end
     
     local dx = dummy_.x
@@ -1196,7 +1236,7 @@ function RenderDummy(vg)
 end
 
 --- 渲染攻击效果（使用玩家绘制的武器形状）
-function RenderAttack(vg)
+RenderAttack = function(vg)
     if not attacking_ or not currentAttack_ then return end
     
     local atk = currentAttack_
@@ -1295,7 +1335,7 @@ end
 --- @param angle number 旋转角度（弧度）
 --- @param color table 颜色 {r, g, b}
 --- @param scale number 额外缩放
-function RenderWeaponShape(vg, cx, cy, angle, color, scale, flipX)
+RenderWeaponShape = function(vg, cx, cy, angle, color, scale, flipX)
     if #weaponStrokes_ == 0 then
         -- 无笔画时：渲染默认武器线条
         RenderDefaultWeapon(vg, cx, cy, angle, color)
@@ -1348,7 +1388,7 @@ function RenderWeaponShape(vg, cx, cy, angle, color, scale, flipX)
 end
 
 --- 没有笔画时的默认武器渲染
-function RenderDefaultWeapon(vg, cx, cy, angle, color)
+RenderDefaultWeapon = function(vg, cx, cy, angle, color)
     nvgSave(vg)
     nvgTranslate(vg, cx, cy)
     nvgRotate(vg, angle)
@@ -1373,7 +1413,7 @@ function RenderDefaultWeapon(vg, cx, cy, angle, color)
 end
 
 --- 渲染玩家（带程序化动画）
-function RenderPlayer(vg)
+RenderPlayer = function(vg)
     local px = player_.x
     local py = player_.y
     local pw = player_.width
@@ -1498,7 +1538,7 @@ function RenderPlayer(vg)
 end
 
 --- 命中特效渲染
-function RenderHitEffects(vg)
+RenderHitEffects = function(vg)
     local fontId = NVG.GetFont()
     if fontId == -1 then return end
     
@@ -1516,7 +1556,7 @@ function RenderHitEffects(vg)
 end
 
 --- 连击渲染
-function RenderCombo(vg)
+RenderCombo = function(vg)
     if combo_ < 2 then return end
     
     local fontId = NVG.GetFont()
@@ -1534,7 +1574,7 @@ function RenderCombo(vg)
 end
 
 --- 变形特效渲染
-function RenderTransformEffect(vg)
+RenderTransformEffect = function(vg)
     if transformAnim_ <= 0 then return end
     
     local alpha = math.floor(transformAnim_ * 200)

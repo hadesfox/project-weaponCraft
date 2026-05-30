@@ -7,6 +7,14 @@ local Config = require("Config")
 
 local Analyzer = {}
 
+-- 前向声明内部函数
+local ComputeBounds
+local CountSharpPoints
+local DetectComposite
+local AreStrokesConnected
+local ComputeWidthProfile
+local ClassifyWeapon
+
 --- 分析所有笔画，返回武器类型和属性
 ---@param strokes table[] 笔画数组
 ---@return table 分析结果 {type, features, isComposite, shapeCount}
@@ -76,7 +84,7 @@ function Analyzer.Analyze(strokes)
 end
 
 --- 计算点集的包围盒
-function ComputeBounds(points)
+ComputeBounds = function(points)
     local minX, minY = math.huge, math.huge
     local maxX, maxY = -math.huge, -math.huge
     
@@ -99,7 +107,7 @@ function ComputeBounds(points)
 end
 
 --- 检测尖锐顶点数量
-function CountSharpPoints(strokes)
+CountSharpPoints = function(strokes)
     local sharpCount = 0
     local threshold = math.cos(math.rad(Config.Analyzer.SharpAngleDeg))
     local minEdge = Config.Analyzer.MinEdgeLength
@@ -131,7 +139,7 @@ end
 
 --- 检测复合武器（隐藏机制）
 --- 条件：2-3个独立形状 + 至少1个闭合形状 + 形状间有连接趋势
-function DetectComposite(strokes, result)
+DetectComposite = function(strokes, result)
     -- 至少2个笔画
     if #strokes < 2 then return false end
     
@@ -153,7 +161,7 @@ function DetectComposite(strokes, result)
 end
 
 --- 判断两个笔画是否有连接关系
-function AreStrokesConnected(strokeA, strokeB)
+AreStrokesConnected = function(strokeA, strokeB)
     local threshold = Config.Analyzer.ConnectionDistanceSq
     local ptsA = strokeA.points
     local ptsB = strokeB.points
@@ -183,7 +191,7 @@ end
 --- 分析形状的宽度分布特征（用于区分斧和剑）
 --- 将形状按高度切成若干水平带，统计每带的宽度
 --- 返回: widthRatio（最大宽/最小宽）, wideSpan（宽区域占比）
-function ComputeWidthProfile(strokes)
+ComputeWidthProfile = function(strokes)
     if not strokes or #strokes == 0 then return 1.0, 0 end
     -- 收集所有点
     local allPts = {}
@@ -246,7 +254,7 @@ function ComputeWidthProfile(strokes)
 end
 
 --- 根据特征分类武器类型
-function ClassifyWeapon(result, strokes)
+ClassifyWeapon = function(result, strokes)
     local ar = result.aspectRatio
     local sharp = result.pointCount
     local closed = result.closedCount

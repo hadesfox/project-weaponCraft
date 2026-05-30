@@ -19,6 +19,9 @@ local canvasH_ = Config.Canvas.Height
 -- NanoVG 上下文（从外部设置）
 local nvg_ = nil
 
+-- 前向声明内部函数
+local RenderStroke
+
 --- 初始化画布
 ---@param nvgCtx userdata NanoVG 上下文
 function Canvas.Init(nvgCtx)
@@ -200,7 +203,7 @@ function Canvas.Render(vg, offsetX, offsetY)
 end
 
 --- 渲染单个笔画
-function RenderStroke(vg, stroke, ox, oy)
+RenderStroke = function(vg, stroke, ox, oy)
     local pts = stroke.points
     if #pts < 2 then return end
     

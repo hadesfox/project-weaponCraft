@@ -11,6 +11,10 @@ local ResultState = {}
 local gameData_ = nil
 local onComplete_ = nil
 
+-- 前向声明内部函数
+local GenerateWeaponData
+local CreateStatRow
+
 --- 进入结果状态
 function ResultState.Enter(gameData, onComplete)
     gameData_ = gameData
@@ -23,7 +27,7 @@ function ResultState.Enter(gameData, onComplete)
 end
 
 --- 生成武器数据
-function GenerateWeaponData()
+GenerateWeaponData = function()
     local weaponType = gameData_.weaponType or "UNKNOWN"
     local typeInfo = Config.WeaponTypes[weaponType] or Config.WeaponTypes.UNKNOWN
     local quality = gameData_.quality or Config.Quality[1]
@@ -147,12 +151,70 @@ function ResultState.BuildUI()
                         gap = 6,
                         children = statsChildren,
                     },
-                    -- 锻造评分
-                    UI.Label {
-                        text = "锻造评分: " .. gameData_.forgeScore .. "/100",
-                        fontSize = 12,
-                        fontColor = Config.Colors.Gold,
+                    -- 锻造评分（分项 + 总分）
+                    UI.Panel {
+                        width = "100%",
                         marginTop = 8,
+                        gap = 4,
+                        alignItems = "center",
+                        children = {
+                            UI.Panel {
+                                width = "80%",
+                                flexDirection = "row",
+                                justifyContent = "space-between",
+                                children = {
+                                    UI.Label {
+                                        text = "🔨 锤击",
+                                        fontSize = 12,
+                                        fontColor = { 180, 180, 200, 255 },
+                                    },
+                                    UI.Label {
+                                        text = tostring(gameData_.hammerScore or 0),
+                                        fontSize = 12,
+                                        fontColor = { 180, 180, 200, 255 },
+                                    },
+                                },
+                            },
+                            UI.Panel {
+                                width = "80%",
+                                flexDirection = "row",
+                                justifyContent = "space-between",
+                                children = {
+                                    UI.Label {
+                                        text = "💧 淬火",
+                                        fontSize = 12,
+                                        fontColor = { 180, 180, 200, 255 },
+                                    },
+                                    UI.Label {
+                                        text = tostring(gameData_.quenchScore or 0),
+                                        fontSize = 12,
+                                        fontColor = { 180, 180, 200, 255 },
+                                    },
+                                },
+                            },
+                            UI.Panel {
+                                width = "80%", height = 1,
+                                backgroundColor = { 80, 80, 100, 100 },
+                                marginTop = 2, marginBottom = 2,
+                            },
+                            UI.Panel {
+                                width = "80%",
+                                flexDirection = "row",
+                                justifyContent = "space-between",
+                                children = {
+                                    UI.Label {
+                                        text = "总评分",
+                                        fontSize = 14,
+                                        fontColor = Config.Colors.Gold,
+                                    },
+                                    UI.Label {
+                                        text = tostring(gameData_.forgeScore) .. "/100",
+                                        fontSize = 14,
+                                        fontColor = Config.Colors.Gold,
+                                    },
+                                },
+                            },
+                        },
                     },
                     -- 复合提示
                     wd.isComposite and UI.Panel {
@@ -186,7 +248,7 @@ function ResultState.BuildUI()
 end
 
 --- 创建属性行
-function CreateStatRow(label, value)
+CreateStatRow = function(label, value)
     return UI.Panel {
         width = "100%",
         flexDirection = "row",
