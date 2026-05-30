@@ -73,9 +73,22 @@ local hitEffects_ = {}
 
 -- 木桩（永久靶子）
 local dummy_ = nil
+local dummyDef_ = nil
+
+-- 平台/靶子比例定义
+local platformDefs_ = {}
+local targetDefs_ = {}
+
+-- 物理缩放因子（基于设计高度600px）
+local DESIGN_HEIGHT = 600
+local physScale_ = 1.0
 
 -- 主角贴图
-local playerImage_ = nil
+local playerImage_ = nil       -- 待机帧
+local playerRunFrames_ = {}    -- 跑步动画帧数组
+local playerFrameIndex_ = 1    -- 当前帧索引
+local playerFrameTimer_ = 0    -- 帧切换计时器
+local FRAME_DURATION = 0.12    -- 每帧持续时间(秒)
 
 -- UI 引用
 local uiRoot_ = nil
@@ -88,18 +101,26 @@ function TrialState.Enter(gameData, onComplete)
     screenW_ = graphics:GetWidth() / graphics:GetDPR()
     screenH_ = graphics:GetHeight() / graphics:GetDPR()
     
+    -- 物理缩放因子：屏幕越大，速度/重力等比增大，保持相对运动感一致
+    physScale_ = screenH_ / DESIGN_HEIGHT
+    
     -- 地面位置
     groundY_ = screenH_ * Config.Trial.GroundY
     
-    -- 初始化玩家
-    player_.width = Config.Trial.PlayerWidth
-    player_.height = Config.Trial.PlayerHeight
+    -- 初始化玩家（尺寸按比例缩放）
+    player_.width = Config.Trial.PlayerWidth * physScale_
+    player_.height = Config.Trial.PlayerHeight * physScale_
     player_.x = screenW_ * 0.2
     player_.y = groundY_ - player_.height
     player_.vx = 0
     player_.vy = 0
     player_.onGround = true
     player_.facingRight = true
+    -- 程序化动画状态
+    player_.animTime = 0         -- 动画累计时间
+    player_.state = "idle"       -- idle / run / jump / fall
+    player_.landSquash = 0       -- 着地压缩动画计时器
+    player_.prevOnGround = true  -- 上一帧是否着地（用于检测落地瞬间）
     
     -- 处理武器绘图数据（归一化笔画）
     PrepareWeaponStrokes()
@@ -117,8 +138,21 @@ function TrialState.Enter(gameData, onComplete)
     inputLeft_ = false
     inputRight_ = false
     
-    -- 加载主角贴图
+    -- 加载主角贴图（待机帧）
     playerImage_ = nvgCreateImage(NVG.Get(), Config.Trial.PlayerImage, 0)
+    -- 加载跑步动画帧
+    local runFramePaths = {
+        "image/blacksmith_run1_20260530064604.png",
+        "image/blacksmith_run2_20260530064600.png",
+        "image/blacksmith_run3_20260530064609.png",
+        "image/blacksmith_run4_20260530064717.png",
+    }
+    playerRunFrames_ = {}
+    for i = 1, #runFramePaths do
+        playerRunFrames_[i] = nvgCreateImage(NVG.Get(), runFramePaths[i], 0)
+    end
+    playerFrameIndex_ = 1
+    playerFrameTimer_ = 0
     
     -- 生成平台和靶子
     GeneratePlatforms()
@@ -259,66 +293,112 @@ function TrialState.Leave()
         nvgDeleteImage(NVG.Get(), playerImage_)
         playerImage_ = nil
     end
+    -- 释放跑步帧
+    for i = 1, #playerRunFrames_ do
+        if playerRunFrames_[i] and playerRunFrames_[i] ~= 0 then
+            nvgDeleteImage(NVG.Get(), playerRunFrames_[i])
+        end
+    end
+    playerRunFrames_ = {}
 end
 
 --- 生成平台（多层复杂布局）
 function GeneratePlatforms()
-    platforms_ = {}
-    local pw = Config.Trial.PlatformWidth
-    local ph = Config.Trial.PlatformHeight
+    -- 平台使用比例坐标存储，渲染/物理时实时计算实际位置
+    -- rx: X占屏幕宽比例, ry: Y相对地面的比例(0=地面, 1=屏幕顶部), rw: 宽度占屏幕宽比例
+    platformDefs_ = {}
     
     -- 第一层：地面上方低矮平台（左中右）
-    local layer1Y = groundY_ - 70
-    platforms_[#platforms_ + 1] = { x = screenW_ * 0.05, y = layer1Y, w = pw, h = ph }
-    platforms_[#platforms_ + 1] = { x = screenW_ * 0.42, y = layer1Y - 10, w = pw * 0.8, h = ph }
-    platforms_[#platforms_ + 1] = { x = screenW_ * 0.75, y = layer1Y + 5, w = pw, h = ph }
+    platformDefs_[#platformDefs_ + 1] = { rx = 0.05, ry = 0.12, rw = 0.10 }
+    platformDefs_[#platformDefs_ + 1] = { rx = 0.42, ry = 0.14, rw = 0.08 }
+    platformDefs_[#platformDefs_ + 1] = { rx = 0.75, ry = 0.11, rw = 0.10 }
     
     -- 第二层：中间高度平台（错开分布）
-    local layer2Y = groundY_ - 145
-    platforms_[#platforms_ + 1] = { x = screenW_ * 0.15, y = layer2Y, w = pw * 1.1, h = ph }
-    platforms_[#platforms_ + 1] = { x = screenW_ * 0.55, y = layer2Y - 15, w = pw * 0.9, h = ph }
-    platforms_[#platforms_ + 1] = { x = screenW_ * 0.82, y = layer2Y + 10, w = pw * 0.7, h = ph }
+    platformDefs_[#platformDefs_ + 1] = { rx = 0.15, ry = 0.25, rw = 0.11 }
+    platformDefs_[#platformDefs_ + 1] = { rx = 0.55, ry = 0.28, rw = 0.09 }
+    platformDefs_[#platformDefs_ + 1] = { rx = 0.82, ry = 0.23, rw = 0.07 }
     
     -- 第三层：高处小平台（跳跃挑战）
-    local layer3Y = groundY_ - 220
-    platforms_[#platforms_ + 1] = { x = screenW_ * 0.3, y = layer3Y, w = pw * 0.7, h = ph }
-    platforms_[#platforms_ + 1] = { x = screenW_ * 0.65, y = layer3Y - 10, w = pw * 0.7, h = ph }
+    platformDefs_[#platformDefs_ + 1] = { rx = 0.30, ry = 0.38, rw = 0.07 }
+    platformDefs_[#platformDefs_ + 1] = { rx = 0.65, ry = 0.40, rw = 0.07 }
     
-    -- 初始化木桩（地面上，靠中间位置）
+    -- 初始化木桩比例（基础宽高在 RecalcPlatforms 中按 physScale_ 缩放）
+    dummyDef_ = { rx = 0.50, baseW = 20, baseH = 60 }
+    
+    -- 立即计算一次实际坐标
+    RecalcPlatforms()
+end
+
+--- 根据当前屏幕尺寸重算平台、木桩实际坐标
+function RecalcPlatforms()
+    platforms_ = {}
+    local ph = Config.Trial.PlatformHeight
+    local arenaH = groundY_  -- 地面以上的可用高度
+    
+    for i = 1, #platformDefs_ do
+        local def = platformDefs_[i]
+        platforms_[i] = {
+            x = screenW_ * def.rx,
+            y = groundY_ - arenaH * def.ry,
+            w = screenW_ * def.rw,
+            h = ph,
+        }
+    end
+    
+    -- 木桩（尺寸按 physScale_ 缩放）
     dummy_ = {
-        x = screenW_ * 0.6,
+        x = screenW_ * dummyDef_.rx,
         y = groundY_,
-        width = 20,
-        height = 60,
-        hitAnim = 0,       -- 受击闪动
-        hitDir = 0,        -- 受击方向
-        hp = 999,          -- 永远不会死
+        width = dummyDef_.baseW * physScale_,
+        height = dummyDef_.baseH * physScale_,
+        hitAnim = dummy_ and dummy_.hitAnim or 0,
+        hitDir = dummy_ and dummy_.hitDir or 0,
+        hp = 999,
     }
 end
 
---- 生成靶子
+--- 生成靶子（使用比例坐标）
 function SpawnTargets()
     targets_ = {}
-    local margin = 50
+    targetDefs_ = {}
+    local arenaH = groundY_
+    
     for i = 1, Config.Trial.TargetCount do
-        local size = Config.Trial.TargetMinSize + math.random() * (Config.Trial.TargetMaxSize - Config.Trial.TargetMinSize)
-        local tx, ty
-        if i <= #platforms_ and math.random() > 0.3 then
-            local p = platforms_[i]
-            tx = p.x + p.w / 2 + math.random(-20, 20)
-            ty = p.y - size - 5
+        local baseSize = Config.Trial.TargetMinSize + math.random() * (Config.Trial.TargetMaxSize - Config.Trial.TargetMinSize)
+        local size = baseSize * physScale_
+        local rx, ry
+        if i <= #platformDefs_ and math.random() > 0.3 then
+            local pdef = platformDefs_[i]
+            rx = pdef.rx + pdef.rw / 2 + (math.random() - 0.5) * 0.04
+            ry = pdef.ry + size / arenaH + 0.01
         else
-            tx = margin + math.random() * (screenW_ - margin * 2)
-            ty = groundY_ - size - math.random(5, 80)
+            rx = 0.05 + math.random() * 0.9
+            ry = (size + math.random(5, 80) * physScale_) / arenaH
         end
-        targets_[#targets_ + 1] = {
-            x = tx, y = ty,
+        targetDefs_[i] = { rx = rx, ry = ry, baseSize = baseSize }
+        targets_[i] = {
+            x = screenW_ * rx,
+            y = groundY_ - arenaH * ry,
             size = size,
             alive = true,
             hitAnim = 0,
             spawnAnim = 1.0,
             knockX = 0, knockY = 0,
         }
+    end
+end
+
+--- 根据屏幕尺寸重算靶子位置和大小
+function RecalcTargets()
+    if not targetDefs_ then return end
+    local arenaH = groundY_
+    for i = 1, #targetDefs_ do
+        if targets_[i] then
+            local def = targetDefs_[i]
+            targets_[i].x = screenW_ * def.rx
+            targets_[i].y = groundY_ - arenaH * def.ry
+            targets_[i].size = def.baseSize * physScale_
+        end
     end
 end
 
@@ -468,7 +548,7 @@ end
 
 --- 玩家物理（横版重力）
 function UpdatePlayerPhysics(dt)
-    local speed = Config.Trial.MoveSpeed
+    local speed = Config.Trial.MoveSpeed * physScale_
     if attacking_ then speed = 0 end  -- 攻击时不能移动，避免惯性前冲
     
     if inputLeft_ then
@@ -482,9 +562,9 @@ function UpdatePlayerPhysics(dt)
     end
     
     if not player_.onGround then
-        player_.vy = player_.vy + Config.Trial.Gravity * dt
-        if player_.vy > Config.Trial.MaxFallSpeed then
-            player_.vy = Config.Trial.MaxFallSpeed
+        player_.vy = player_.vy + Config.Trial.Gravity * physScale_ * dt
+        if player_.vy > Config.Trial.MaxFallSpeed * physScale_ then
+            player_.vy = Config.Trial.MaxFallSpeed * physScale_
         end
     end
     
@@ -517,12 +597,62 @@ function UpdatePlayerPhysics(dt)
     end
     
     player_.x = math.max(0, math.min(screenW_ - player_.width, player_.x))
+    
+    -- 更新动画状态
+    local wasOnGround = player_.prevOnGround
+    player_.prevOnGround = player_.onGround
+    
+    -- 检测刚落地 → 触发着地压缩
+    if player_.onGround and not wasOnGround then
+        player_.landSquash = 0.2  -- 压缩持续时间(秒)
+    end
+    
+    -- 更新着地压缩计时
+    if player_.landSquash > 0 then
+        player_.landSquash = player_.landSquash - dt
+        if player_.landSquash < 0 then player_.landSquash = 0 end
+    end
+    
+    -- 确定动画状态
+    if not player_.onGround then
+        if player_.vy < 0 then
+            player_.state = "jump"
+        else
+            player_.state = "fall"
+        end
+    elseif math.abs(player_.vx) > 0.1 then
+        player_.state = "run"
+    else
+        player_.state = "idle"
+    end
+    
+    -- 动画时间累计（跑步时按速度推进）
+    if player_.state == "run" then
+        player_.animTime = player_.animTime + dt * 12  -- 跑步频率
+        -- 帧动画切换
+        playerFrameTimer_ = playerFrameTimer_ + dt
+        if playerFrameTimer_ >= FRAME_DURATION then
+            playerFrameTimer_ = playerFrameTimer_ - FRAME_DURATION
+            playerFrameIndex_ = playerFrameIndex_ + 1
+            if playerFrameIndex_ > #playerRunFrames_ then
+                playerFrameIndex_ = 1
+            end
+        end
+    elseif player_.state == "idle" then
+        player_.animTime = player_.animTime + dt * 2   -- 待机呼吸频率
+        -- 回到待机帧
+        playerFrameIndex_ = 1
+        playerFrameTimer_ = 0
+    else
+        -- 跳跃/下落时保持当前帧不切换
+        playerFrameTimer_ = 0
+    end
 end
 
 --- 跳跃
 function DoJump()
     if player_.onGround then
-        player_.vy = Config.Trial.JumpVelocity
+        player_.vy = Config.Trial.JumpVelocity * physScale_
         player_.onGround = false
     end
 end
@@ -559,7 +689,7 @@ function UpdateAttack(dt)
     -- 冲撞前移
     if currentAttack_ and currentAttack_.isCharge then
         local dir = player_.facingRight and 1 or -1
-        local chargeDist = (currentAttack_.chargeDistance or 40) * dt / attackDuration_
+        local chargeDist = (currentAttack_.chargeDistance or 40) * physScale_ * dt / attackDuration_
         player_.x = player_.x + dir * chargeDist
     end
     
@@ -572,9 +702,9 @@ function CheckAttackCollision(progress)
     
     local atk = currentAttack_
     local dir = player_.facingRight and 1 or -1
-    local originX = player_.x + player_.width / 2 + dir * 10
+    local originX = player_.x + player_.width / 2 + dir * 10 * physScale_
     local originY = player_.y + player_.height * 0.4
-    local range = atk.range
+    local range = atk.range * physScale_
     
     if atk.isThrust then
         local thrustLen = GetThrustLength(progress)
@@ -621,9 +751,9 @@ function CheckDummyCollision(progress)
     
     local atk = currentAttack_
     local dir = player_.facingRight and 1 or -1
-    local originX = player_.x + player_.width / 2 + dir * 10
+    local originX = player_.x + player_.width / 2 + dir * 10 * physScale_
     local originY = player_.y + player_.height * 0.4
-    local range = atk.range
+    local range = atk.range * physScale_
     
     -- 木桩中心
     local dCx = dummy_.x
@@ -661,8 +791,8 @@ end
 
 --- 突刺延伸长度
 function GetThrustLength(progress)
-    if not currentAttack_ then return 60 end
-    local len = currentAttack_.range
+    if not currentAttack_ then return 60 * physScale_ end
+    local len = currentAttack_.range * physScale_
     if progress < 0.3 then
         return len * (progress / 0.3)
     elseif progress < 0.7 then
@@ -857,9 +987,31 @@ function TrialState.Render(vg)
     local h = graphics:GetHeight()
     local dpr = graphics:GetDPR()
     
+    local prevW = screenW_
+    local prevH = screenH_
     screenW_ = w / dpr
     screenH_ = h / dpr
     groundY_ = screenH_ * Config.Trial.GroundY
+    
+    -- 屏幕尺寸变化时重算平台和靶子位置
+    if prevW ~= screenW_ or prevH ~= screenH_ then
+        physScale_ = screenH_ / DESIGN_HEIGHT
+        if platformDefs_ then
+            RecalcPlatforms()
+            RecalcTargets()
+            -- 玩家尺寸和位置按比例适配
+            player_.width = Config.Trial.PlayerWidth * physScale_
+            player_.height = Config.Trial.PlayerHeight * physScale_
+            if prevW > 0 and prevH > 0 then
+                player_.x = player_.x * (screenW_ / prevW)
+                player_.y = player_.y * (screenH_ / prevH)
+            end
+            -- 确保不穿出地面
+            if player_.y + player_.height > groundY_ then
+                player_.y = groundY_ - player_.height
+            end
+        end
+    end
     
     nvgBeginFrame(vg, w, h, 1.0)
     nvgScale(vg, dpr, dpr)
@@ -1009,8 +1161,8 @@ function RenderDummy(vg)
     end
     
     -- 顶部横梁（靶标区域）
-    local armW = 36
-    local armH = 8
+    local armW = 36 * physScale_
+    local armH = 8 * physScale_
     nvgBeginPath(vg)
     nvgRoundedRect(vg, dx - armW / 2 + shakeX, dy - dh - armH / 2, armW, armH, 3)
     nvgFillColor(vg, nvgRGBA(100, 70, 40, 240))
@@ -1020,14 +1172,14 @@ function RenderDummy(vg)
     if dummy_.hitAnim > 0.5 then
         local alpha = math.floor((dummy_.hitAnim - 0.5) * 2 * 200)
         nvgBeginPath(vg)
-        nvgCircle(vg, dx + shakeX, dy - dh / 2, 20)
+        nvgCircle(vg, dx + shakeX, dy - dh / 2, 20 * physScale_)
         nvgFillColor(vg, nvgRGBA(255, 255, 200, alpha))
         nvgFill(vg)
     end
     
     -- 底座
     nvgBeginPath(vg)
-    nvgRoundedRect(vg, dx - dw * 0.8 + shakeX, dy - 6, dw * 1.6, 6, 2)
+    nvgRoundedRect(vg, dx - dw * 0.8 + shakeX, dy - 6 * physScale_, dw * 1.6, 6 * physScale_, 2)
     nvgFillColor(vg, nvgRGBA(80, 60, 40, 240))
     nvgFill(vg)
     
@@ -1035,10 +1187,10 @@ function RenderDummy(vg)
     local fontId = NVG.GetFont()
     if fontId ~= -1 then
         nvgFontFaceId(vg, fontId)
-        nvgFontSize(vg, 10)
+        nvgFontSize(vg, 10 * physScale_)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
         nvgFillColor(vg, nvgRGBA(180, 160, 140, 200))
-        nvgText(vg, dx + shakeX, dy - dh - 10, "木桩", nil)
+        nvgText(vg, dx + shakeX, dy - dh - 10 * physScale_, "木桩", nil)
     end
 end
 
@@ -1049,7 +1201,7 @@ function RenderAttack(vg)
     local atk = currentAttack_
     local progress = attackTimer_ / attackDuration_
     local dir = player_.facingRight and 1 or -1
-    local originX = player_.x + player_.width / 2 + dir * 10
+    local originX = player_.x + player_.width / 2 + dir * 10 * physScale_
     local originY = player_.y + player_.height * 0.4
     local wc = gameData_.weaponData and gameData_.weaponData.typeInfo.color or {200, 200, 200}
     
@@ -1063,7 +1215,7 @@ function RenderAttack(vg)
         -- 尖端朝刺出方向：朝右+π/2，朝左-π/2；flipX 镜像形状
         local weaponAngle = player_.facingRight and (math.pi / 2) or (-math.pi / 2)
         local flipX = not player_.facingRight
-        RenderWeaponShape(vg, originX + dir * len * 0.5, originY, weaponAngle, wc, 0.8, flipX)
+        RenderWeaponShape(vg, originX + dir * len * 0.5, originY, weaponAngle, wc, 0.8 * physScale_, flipX)
         
         -- 突刺轨迹线
         nvgBeginPath(vg)
@@ -1076,12 +1228,12 @@ function RenderAttack(vg)
         
         -- 尖端闪光
         nvgBeginPath(vg)
-        nvgCircle(vg, tipX, tipY, 4 * (1 - progress))
+        nvgCircle(vg, tipX, tipY, 4 * (1 - progress) * physScale_)
         nvgFillColor(vg, nvgRGBA(255, 255, 255, math.floor(200 * (1 - progress))))
         nvgFill(vg)
     else
         -- 挥动：武器绕原点旋转
-        local range = atk.range
+        local range = atk.range * physScale_
         local easedProgress = 1.0 - (1.0 - progress) * (1.0 - progress)
         local arcDir = (atk.direction or 1)
         local startAngle = math.rad(atk.startAngle or -60)
@@ -1124,12 +1276,12 @@ function RenderAttack(vg)
         local weaponX = originX + math.cos(currentAngle) * range * 0.6
         local weaponY = originY + math.sin(currentAngle) * range * 0.6
         local flipX = not player_.facingRight
-        RenderWeaponShape(vg, weaponX, weaponY, weaponAngle, wc, 1.0, flipX)
+        RenderWeaponShape(vg, weaponX, weaponY, weaponAngle, wc, 1.0 * physScale_, flipX)
         
         -- 刃尖光芒
         local glowAlpha = math.floor(180 * (1 - progress))
         nvgBeginPath(vg)
-        nvgCircle(vg, tipX, tipY, 5 * (1 - progress * 0.5))
+        nvgCircle(vg, tipX, tipY, 5 * (1 - progress * 0.5) * physScale_)
         nvgFillColor(vg, nvgRGBA(255, 255, 255, glowAlpha))
         nvgFill(vg)
     end
@@ -1219,32 +1371,90 @@ function RenderDefaultWeapon(vg, cx, cy, angle, color)
     nvgRestore(vg)
 end
 
---- 渲染玩家
+--- 渲染玩家（带程序化动画）
 function RenderPlayer(vg)
     local px = player_.x
     local py = player_.y
     local pw = player_.width
     local ph = player_.height
+    local state = player_.state
+    local t = player_.animTime
     
-    if playerImage_ and playerImage_ ~= 0 then
+    -- === 程序化动画参数计算 ===
+    local bobY = 0        -- 上下弹跳偏移
+    local lean = 0        -- 倾斜角度(弧度)
+    local scaleX = 1.0    -- 水平缩放（挤压拉伸）
+    local scaleY = 1.0    -- 垂直缩放
+    
+    if state == "run" then
+        -- 跑步：上下弹跳 + 身体前倾 + 轻微挤压节奏
+        bobY = math.sin(t) * 3 * physScale_
+        lean = (player_.facingRight and 1 or -1) * 0.06  -- 前倾约3.4°
+        local squishPhase = math.sin(t * 2)  -- 双倍频率的微小挤压
+        scaleX = 1.0 + squishPhase * 0.03
+        scaleY = 1.0 - squishPhase * 0.03
+    elseif state == "idle" then
+        -- 待机：轻微呼吸起伏
+        bobY = math.sin(t) * 1 * physScale_
+        scaleY = 1.0 + math.sin(t) * 0.015
+        scaleX = 1.0 - math.sin(t) * 0.01
+    end
+    
+    -- 着地压缩（覆盖其他缩放）
+    if player_.landSquash > 0 then
+        local progress = player_.landSquash / 0.2  -- 1→0 衰减
+        local squashAmount = progress * 0.2  -- 最大压缩20%
+        scaleX = 1.0 + squashAmount * 0.6
+        scaleY = 1.0 - squashAmount
+        bobY = 0  -- 压缩时不弹跳
+    end
+    
+    -- === 渲染角色精灵 ===
+    -- 根据状态选择当前显示帧
+    local currentFrame = playerImage_  -- 默认待机帧
+    if state == "run" and #playerRunFrames_ > 0 then
+        local idx = math.max(1, math.min(playerFrameIndex_, #playerRunFrames_))
+        local frame = playerRunFrames_[idx]
+        if frame and frame ~= 0 then
+            -- 检查帧图片是否真正加载完成（异步加载时尺寸为0）
+            local fw, fh = nvgImageSize(vg, frame)
+            if fw > 0 and fh > 0 then
+                currentFrame = frame
+            end
+        end
+    end
+    
+    if currentFrame and currentFrame ~= 0 then
         nvgSave(vg)
+        local imgSize = ph / scaleY  -- 基准图片尺寸（补偿缩放）
+        
+        -- 以角色脚底中心为锚点进行变换
+        local anchorX = px + pw / 2
+        local anchorY = py + ph  -- 脚底
+        
+        nvgTranslate(vg, anchorX, anchorY + bobY)
+        nvgRotate(vg, lean)
+        nvgScale(vg, scaleX, scaleY)
+        
+        -- 翻转处理
         if player_.facingRight then
-            -- 贴图默认朝左，朝右时水平翻转
-            nvgTranslate(vg, px + pw, py)
             nvgScale(vg, -1, 1)
-        else
-            nvgTranslate(vg, px, py)
         end
         
-        local imgPaint = nvgImagePattern(vg, 0, 0, pw, ph, 0, playerImage_, 1.0)
+        -- 从锚点(脚底中心)偏移到图片左上角
+        local drawX = -imgSize / 2
+        local drawY = -imgSize
+        
+        local imgPaint = nvgImagePattern(vg, drawX, drawY, imgSize, imgSize, 0, currentFrame, 1.0)
         nvgBeginPath(vg)
-        nvgRect(vg, 0, 0, pw, ph)
+        nvgRect(vg, drawX, drawY, imgSize, imgSize)
         nvgFillPaint(vg, imgPaint)
         nvgFill(vg)
         nvgRestore(vg)
     else
+        -- 无图片时的备用矩形
         nvgBeginPath(vg)
-        nvgRoundedRect(vg, px, py, pw, ph, 4)
+        nvgRoundedRect(vg, px, py + bobY, pw, ph, 4)
         nvgFillColor(vg, nvgRGBA(80, 160, 255, 230))
         nvgFill(vg)
         nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 180))
@@ -1252,17 +1462,25 @@ function RenderPlayer(vg)
         nvgStroke(vg)
     end
     
-    -- 方向指示
-    local dir = player_.facingRight and 1 or -1
-    local cx = px + pw / 2 + dir * (pw / 2 + 5)
-    local cy = py + ph * 0.4
-    nvgBeginPath(vg)
-    nvgMoveTo(vg, cx + dir * 6, cy)
-    nvgLineTo(vg, cx, cy - 4)
-    nvgLineTo(vg, cx, cy + 4)
-    nvgClosePath(vg)
-    nvgFillColor(vg, nvgRGBA(255, 255, 255, 150))
-    nvgFill(vg)
+    -- === 跑步烟尘粒子 ===
+    if state == "run" and player_.onGround then
+        local footX = px + pw / 2
+        local footY = py + ph + bobY
+        -- 每半个周期产生一个小烟尘
+        local dustPhase = math.sin(t + 1.5)
+        if dustPhase > 0.7 then
+            local alpha = math.floor((dustPhase - 0.7) / 0.3 * 80)
+            local dustDir = player_.facingRight and -1 or 1
+            nvgBeginPath(vg)
+            nvgCircle(vg, footX + dustDir * 6 * physScale_, footY - 2 * physScale_, 3 * physScale_)
+            nvgFillColor(vg, nvgRGBA(200, 180, 150, alpha))
+            nvgFill(vg)
+            nvgBeginPath(vg)
+            nvgCircle(vg, footX + dustDir * 12 * physScale_, footY - 4 * physScale_, 2 * physScale_)
+            nvgFillColor(vg, nvgRGBA(200, 180, 150, math.floor(alpha * 0.6)))
+            nvgFill(vg)
+        end
+    end
 end
 
 --- 命中特效渲染
