@@ -9,6 +9,11 @@ local NVG = require("NVG")
 
 local ForgeState = {}
 
+-- 颜色缓存（从 Config.Colors 统一引用，避免魔法数字）
+local C_SUCCESS = Config.Colors.Success
+local C_DANGER = Config.Colors.Danger
+local C_GOLD = Config.Colors.Gold
+
 local gameData_ = nil
 local onComplete_ = nil
 
@@ -121,9 +126,9 @@ end
 
 --- 随机生成判定区域位置
 --- 区域结构：perfect(10%) + good两侧(30%) = 40%，需确保全部在[-1,1]内
-local PERFECT_HALF = 0.10   -- perfect区半宽（10%/2=5%，映射到±1范围=0.10）
-local GOOD_HALF = 0.40      -- good区半宽（含perfect，(10%+30%)/2=20%，映射=0.40）
-local ZONE_MARGIN = 0.40    -- 区域中心离边缘最小距离
+local PERFECT_HALF = Config.Forge.PerfectHalf
+local GOOD_HALF = Config.Forge.GoodHalf
+local ZONE_MARGIN = Config.Forge.ZoneMargin
 
 local function RandomizeZoneCenter()
     -- 区域中心范围：[-0.60, 0.60]
@@ -555,18 +560,8 @@ function ForgeState.Render(vg)
     nvgEndFrame(vg)
 end
 
-RenderHammerPhase = function(vg, w, h)
-    local cx = w / 2
-    local cy = h / 2
-    
-    -- 震动偏移
-    local shakeX = 0
-    local shakeY = 0
-    if hammerShake_ > 0 then
-        shakeX = (math.random() - 0.5) * hammerShake_ * 6
-        shakeY = (math.random() - 0.5) * hammerShake_ * 6
-    end
-    
+--- 渲染铁砧和锤子动画
+local function RenderAnvilAndHammer(vg, cx, cy, shakeX, shakeY)
     -- 命中闪光
     if hammerFlash_ > 0 then
         nvgBeginPath(vg)
@@ -580,21 +575,18 @@ RenderHammerPhase = function(vg, w, h)
     nvgRoundedRect(vg, cx - 80 + shakeX, cy - 20 + shakeY, 160, 50, 8)
     nvgFillColor(vg, nvgRGBA(80, 75, 70, 255))
     nvgFill(vg)
-    -- 铁砧高光
     nvgBeginPath(vg)
     nvgRoundedRect(vg, cx - 70 + shakeX, cy - 15 + shakeY, 140, 8, 4)
     nvgFillColor(vg, nvgRGBA(120, 115, 110, 255))
     nvgFill(vg)
     
     -- 锤子（跟随节奏摆动）
-    local rhythmPos = math.sin(hammerRhythm_ * math.pi * 2)  -- -1~1
+    local rhythmPos = math.sin(hammerRhythm_ * math.pi * 2)
     local hammerRestY = cy - 80
     local hammerY = hammerRestY
     if hammerFlash_ > 0.5 then
-        -- 锤击瞬间：锤子在下方
         hammerY = cy - 30
     else
-        -- 跟随节奏上下浮动（节奏越高锤子越高）
         local floatRange = 25
         hammerY = hammerRestY - (rhythmPos + 1) * 0.5 * floatRange
     end
@@ -609,9 +601,10 @@ RenderHammerPhase = function(vg, w, h)
     nvgRoundedRect(vg, cx - 18 + shakeX, hammerY - 22 + shakeY, 36, 24, 4)
     nvgFillColor(vg, nvgRGBA(160, 150, 140, 255))
     nvgFill(vg)
-    
-    -- ===== 节奏指示器（核心视觉提示）=====
-    -- 横向进度条，光标来回移动，中间为最佳击打区域
+end
+
+--- 渲染节奏指示条（判定区域 + 移动光标）
+local function RenderRhythmBar(vg, cx, cy)
     local barW = 200
     local barH = 18
     local barX = cx - barW / 2
@@ -626,47 +619,48 @@ RenderHammerPhase = function(vg, w, h)
     nvgStrokeWidth(vg, 1.5)
     nvgStroke(vg)
     
-    -- 区域中心在进度条上的像素位置
+    -- 区域中心像素位置
     local zoneCenterX = cx + hammerZoneCenter_ * (barW / 2 - 6)
     
-    -- 一般区域（灰色，good区宽度=30%，加上perfect共40%）
+    -- good 区域
     local goodZonePixelW = GOOD_HALF * 2 * (barW / 2 - 6)
     nvgBeginPath(vg)
     nvgRoundedRect(vg, zoneCenterX - goodZonePixelW / 2, barY + 2, goodZonePixelW, barH - 4, 4)
     nvgFillColor(vg, nvgRGBA(120, 120, 140, 50))
     nvgFill(vg)
     
-    -- 最佳击打区域（黄色，perfect区宽度=10%）
+    -- perfect 区域
     local perfectZonePixelW = PERFECT_HALF * 2 * (barW / 2 - 6)
     nvgBeginPath(vg)
     nvgRoundedRect(vg, zoneCenterX - perfectZonePixelW / 2, barY + 2, perfectZonePixelW, barH - 4, 4)
-    nvgFillColor(vg, nvgRGBA(255, 200, 50, 100))
+    nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 100))
     nvgFill(vg)
-    nvgStrokeColor(vg, nvgRGBA(255, 200, 50, 200))
+    nvgStrokeColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 200))
     nvgStrokeWidth(vg, 1)
     nvgStroke(vg)
     
-    -- 移动光标（rhythmPos 从 -1~1 映射到 barX ~ barX+barW）
+    -- 移动光标
+    local rhythmPos = math.sin(hammerRhythm_ * math.pi * 2)
     local cursorX = cx + rhythmPos * (barW / 2 - 6)
-    local distToZone = math.abs(rhythmPos - hammerZoneCenter_)  -- 离区域中心距离
+    local distToZone = math.abs(rhythmPos - hammerZoneCenter_)
     
-    -- 光标发光（在perfect区内时发光）
+    -- 光标发光（在 perfect 区内时）
     if distToZone <= PERFECT_HALF then
         nvgBeginPath(vg)
         nvgCircle(vg, cursorX, barY + barH / 2, 14)
-        nvgFillColor(vg, nvgRGBA(255, 200, 50, 50))
+        nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 50))
         nvgFill(vg)
     end
     
-    -- 光标本体（黄色=perfect区，灰色=good区，暗色=miss区）
+    -- 光标本体
     nvgBeginPath(vg)
     nvgCircle(vg, cursorX, barY + barH / 2, 8)
     if distToZone <= PERFECT_HALF then
-        nvgFillColor(vg, nvgRGBA(255, 220, 50, 255))   -- 黄色 = perfect 区
+        nvgFillColor(vg, nvgRGBA(255, 220, 50, 255))
     elseif distToZone <= GOOD_HALF then
-        nvgFillColor(vg, nvgRGBA(150, 150, 170, 255))   -- 灰色 = good 区
+        nvgFillColor(vg, nvgRGBA(150, 150, 170, 255))
     else
-        nvgFillColor(vg, nvgRGBA(60, 60, 70, 255))      -- 黑色 = miss 区
+        nvgFillColor(vg, nvgRGBA(60, 60, 70, 255))
     end
     nvgFill(vg)
     nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 200))
@@ -680,8 +674,10 @@ RenderHammerPhase = function(vg, w, h)
         nvgFillColor(vg, nvgRGBA(0, 0, 0, 100))
         nvgFill(vg)
     end
-    
-    -- ===== 锤击进度指示（5个圆点）=====
+end
+
+--- 渲染锤击进度圆点
+local function RenderHammerDots(vg, cx, cy)
     local dotSpacing = 32
     local dotsStartX = cx - (HAMMER_MAX_HITS - 1) * dotSpacing / 2
     local dotsY = cy + 95
@@ -691,21 +687,18 @@ RenderHammerPhase = function(vg, w, h)
         nvgBeginPath(vg)
         nvgCircle(vg, dotX, dotsY, 9)
         if i <= hammerHits_ then
-            -- 已完成 - 颜色根据质量
             local q = hammerHitQuality_[i]
             if q == "perfect" then
-                nvgFillColor(vg, nvgRGBA(80, 220, 100, 255))   -- 绿色
+                nvgFillColor(vg, nvgRGBA(C_SUCCESS[1], C_SUCCESS[2], C_SUCCESS[3], 255))
             elseif q == "good" then
-                nvgFillColor(vg, nvgRGBA(150, 150, 170, 255))  -- 灰色
+                nvgFillColor(vg, nvgRGBA(150, 150, 170, 255))
             else
-                nvgFillColor(vg, nvgRGBA(200, 60, 60, 255))    -- 红色(失误)
+                nvgFillColor(vg, nvgRGBA(200, 60, 60, 255))
             end
         else
-            -- 未完成
             nvgFillColor(vg, nvgRGBA(50, 50, 60, 255))
         end
         nvgFill(vg)
-        -- 边框
         nvgBeginPath(vg)
         nvgCircle(vg, dotX, dotsY, 9)
         nvgStrokeColor(vg, nvgRGBA(120, 120, 130, 180))
@@ -713,43 +706,43 @@ RenderHammerPhase = function(vg, w, h)
         nvgStroke(vg)
     end
     
-    -- 文字
+    return dotsY
+end
+
+--- 渲染锤击 HUD（倒计时、结果面板、提示、反馈）
+local function RenderHammerHUD(vg, w, cx, cy, dotsY)
     local fontId = NVG.GetFont()
     if fontId == -1 then return end
-    
     nvgFontFaceId(vg, fontId)
     
-    -- 倒计时显示（右上角）
+    -- 倒计时（右上角）
     if not hammerDone_ then
         local timeText = string.format("%.1f", math.max(0, hammerTimeLeft_))
         nvgFontSize(vg, 16)
         nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
         if hammerTimeLeft_ <= 3.0 then
-            nvgFillColor(vg, nvgRGBA(240, 80, 80, 255))
+            nvgFillColor(vg, nvgRGBA(C_DANGER[1], C_DANGER[2], C_DANGER[3], 255))
         else
             nvgFillColor(vg, nvgRGBA(180, 180, 200, 200))
         end
         nvgText(vg, w - 16, 50, timeText .. "s", nil)
     end
     
-    -- 锤击结果展示画面（hammerDone_ 时覆盖正常提示）
+    -- 锤击结果展示
     if hammerDone_ then
-        -- 半透明遮罩
         nvgBeginPath(vg)
         nvgRoundedRect(vg, cx - 110, cy - 60, 220, 90, 12)
         nvgFillColor(vg, nvgRGBA(20, 22, 30, 220))
         nvgFill(vg)
-        nvgStrokeColor(vg, nvgRGBA(255, 200, 50, 150))
+        nvgStrokeColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 150))
         nvgStrokeWidth(vg, 2)
         nvgStroke(vg)
         
-        -- 标题
         nvgFontSize(vg, 20)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         nvgFillColor(vg, nvgRGBA(255, 220, 50, 255))
         nvgText(vg, cx, cy - 40, "锤击完成!", nil)
         
-        -- 评分
         local gradeText
         local gr, gg, gb = 255, 255, 255
         if hammerScore_ >= 90 then
@@ -769,16 +762,16 @@ RenderHammerPhase = function(vg, w, h)
         nvgFillColor(vg, nvgRGBA(gr, gg, gb, 255))
         nvgText(vg, cx, cy - 10, gradeText, nil)
         
-        -- 进度提示
         nvgFontSize(vg, 12)
         nvgFillColor(vg, nvgRGBA(180, 180, 200, 180))
         nvgText(vg, cx, cy + 16, "即将进入淬火...", nil)
         return
     end
     
+    -- 锤击计数
     nvgFontSize(vg, 20)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-    nvgFillColor(vg, nvgRGBA(255, 200, 50, 255))
+    nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 255))
     nvgText(vg, cx, cy - 120, hammerHits_ .. " / " .. HAMMER_MAX_HITS, nil)
     
     -- 提示文字
@@ -791,7 +784,7 @@ RenderHammerPhase = function(vg, w, h)
         nvgText(vg, cx, dotsY + 18, "等待...", nil)
     end
     
-    -- 上次锤击质量反馈（短暂显示）
+    -- 上次锤击质量反馈
     if hammerFlash_ > 0 and hammerHits_ > 0 then
         local lastQ = hammerHitQuality_[hammerHits_]
         local qText = ""
@@ -813,23 +806,32 @@ RenderHammerPhase = function(vg, w, h)
     end
 end
 
-RenderQuenchPhase = function(vg, w, h)
+--- 锤击阶段主渲染入口
+RenderHammerPhase = function(vg, w, h)
     local cx = w / 2
     local cy = h / 2
     
-    local fontId = NVG.GetFont()
-    if fontId == -1 then return end
+    -- 震动偏移
+    local shakeX = 0
+    local shakeY = 0
+    if hammerShake_ > 0 then
+        shakeX = (math.random() - 0.5) * hammerShake_ * 6
+        shakeY = (math.random() - 0.5) * hammerShake_ * 6
+    end
     
-    -- ===== 大号倒计时（最醒目的元素）=====
+    RenderAnvilAndHammer(vg, cx, cy, shakeX, shakeY)
+    RenderRhythmBar(vg, cx, cy)
+    local dotsY = RenderHammerDots(vg, cx, cy)
+    RenderHammerHUD(vg, w, cx, cy, dotsY)
+end
+
+--- 渲染淬火倒计时
+local function RenderQuenchCountdown(vg, cx, cy, fontId)
     local remaining = math.max(0, QUENCH_TIME_LIMIT - quenchTimer_)
     local countdownText = string.format("%.1f", remaining)
-    
-    -- 倒计时背景圆
     local countdownY = cy - 100
-    local urgency = 1.0 - (remaining / QUENCH_TIME_LIMIT)  -- 0→1 越来越紧迫
     local pulseScale = 1.0
     if remaining < 1.0 and not quenchDone_ then
-        -- 最后1秒闪烁
         pulseScale = 1.0 + math.sin(phaseTimer_ * 12) * 0.08
     end
     
@@ -844,7 +846,6 @@ RenderQuenchPhase = function(vg, w, h)
     end
     nvgFill(vg)
     
-    -- 倒计时数字
     nvgFontFaceId(vg, fontId)
     nvgFontSize(vg, 36 * pulseScale)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
@@ -854,14 +855,16 @@ RenderQuenchPhase = function(vg, w, h)
     else
         nvgText(vg, cx, countdownY, countdownText, nil)
     end
-    
-    -- ===== 温度计 =====
+end
+
+--- 渲染温度计（温度条 + 目标线 + 当前温度）
+local function RenderThermometer(vg, cx, cy, fontId)
     local barW = 44
     local barH = 180
     local barX = cx - barW / 2
     local barY = cy - 30
     
-    -- 温度计背景
+    -- 背景
     nvgBeginPath(vg)
     nvgRoundedRect(vg, barX - 4, barY - 4, barW + 8, barH + 8, 8)
     nvgFillColor(vg, nvgRGBA(40, 42, 55, 255))
@@ -886,11 +889,9 @@ RenderQuenchPhase = function(vg, w, h)
     nvgFillColor(vg, nvgRGBA(r, g, b, 230))
     nvgFill(vg)
     
-    -- ===== 目标温度线（绿色） =====
+    -- 目标区域高亮
     local targetRatio = quenchTarget_ / maxTemp
     local targetY = barY + barH * (1 - targetRatio)
-    
-    -- 目标区域（容差范围高亮）
     local tolRatioHalf = (quenchTolerance_ / maxTemp) * barH
     nvgBeginPath(vg)
     nvgRect(vg, barX - 12, targetY - tolRatioHalf, barW + 24, tolRatioHalf * 2)
@@ -912,22 +913,25 @@ RenderQuenchPhase = function(vg, w, h)
     nvgFillColor(vg, nvgRGBA(80, 255, 120, 255))
     nvgText(vg, barX + barW + 20, targetY, math.floor(quenchTarget_) .. "°", nil)
     
-    -- ===== 当前温度数字 =====
+    -- 当前温度数字
     nvgFontSize(vg, 22)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
     nvgFillColor(vg, nvgRGBA(r, g, b, 255))
     nvgText(vg, cx, barY + barH + 14, math.floor(quenchTemp_) .. "°", nil)
     
-    -- ===== 状态提示 =====
+    return barY + barH  -- 返回底部 Y 坐标，供状态提示使用
+end
+
+--- 渲染淬火状态提示
+local function RenderQuenchStatus(vg, cx, barBottom)
     nvgFontSize(vg, 14)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
     if quenchDone_ then
-        -- 结果显示
         local diff = math.abs(quenchTemp_ - quenchTarget_)
         local resultText
         if diff <= 15 then
             resultText = "完美淬火!"
-            nvgFillColor(vg, nvgRGBA(255, 200, 50, 255))
+            nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 255))
         elseif diff <= 30 then
             resultText = "优秀!"
             nvgFillColor(vg, nvgRGBA(80, 255, 120, 255))
@@ -939,15 +943,28 @@ RenderQuenchPhase = function(vg, w, h)
             nvgFillColor(vg, nvgRGBA(200, 200, 200, 255))
         end
         nvgFontSize(vg, 20)
-        nvgText(vg, cx, barY + barH + 42, resultText, nil)
+        nvgText(vg, cx, barBottom + 42, resultText, nil)
     else
         nvgFillColor(vg, nvgRGBA(180, 180, 200, 200))
         if quenchHolding_ then
-            nvgText(vg, cx, barY + barH + 42, "淬火中... 松开即停止!", nil)
+            nvgText(vg, cx, barBottom + 42, "淬火中... 松开即停止!", nil)
         else
-            nvgText(vg, cx, barY + barH + 42, "按住淬火，松开停止! 停在绿线上!", nil)
+            nvgText(vg, cx, barBottom + 42, "按住淬火，松开停止! 停在绿线上!", nil)
         end
     end
+end
+
+--- 淬火阶段主渲染入口
+RenderQuenchPhase = function(vg, w, h)
+    local cx = w / 2
+    local cy = h / 2
+    
+    local fontId = NVG.GetFont()
+    if fontId == -1 then return end
+    
+    RenderQuenchCountdown(vg, cx, cy, fontId)
+    local barBottom = RenderThermometer(vg, cx, cy, fontId)
+    RenderQuenchStatus(vg, cx, barBottom)
 end
 
 return ForgeState

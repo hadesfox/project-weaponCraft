@@ -125,9 +125,14 @@ local RenderPlatforms
 local RenderTargets
 local RenderDummy
 local RenderAttack
+local RenderThrustAttack
+local RenderSwingAttack
 local RenderWeaponShape
 local RenderDefaultWeapon
 local RenderPlayer
+local CalcPlayerAnimParams
+local RenderPlayerSprite
+local RenderRunDust
 local RenderHitEffects
 local RenderCombo
 local RenderTransformEffect
@@ -180,12 +185,7 @@ function TrialState.Enter(gameData, onComplete)
     -- 加载主角贴图（待机帧）
     playerImage_ = nvgCreateImage(NVG.Get(), Config.Trial.PlayerImage, 0)
     -- 加载跑步动画帧（4帧完整循环：右腿前→过渡→左腿前→过渡）
-    local runFramePaths = {
-        "image/run_frame_A_20260530070458.png",  -- 右腿前迈，左腿后蹬
-        "image/run_frame_B_20260530070453.png",  -- 过渡（双腿收拢，身体上弹）
-        "image/run_frame_C_20260530070452.png",  -- 左腿前迈，右腿后蹬
-        "image/run_frame_D_20260530070559.png",  -- 过渡（双腿收拢，身体下沉）
-    }
+    local runFramePaths = Config.Trial.RunFrames
     playerRunFrames_ = {}
     for i = 1, #runFramePaths do
         playerRunFrames_[i] = nvgCreateImage(NVG.Get(), runFramePaths[i], 0)
@@ -1244,96 +1244,102 @@ RenderDummy = function(vg)
     end
 end
 
---- 渲染攻击效果（使用玩家绘制的武器形状）
+--- 渲染突刺攻击（武器沿水平方向延伸）
+RenderThrustAttack = function(vg, atk, progress, originX, originY, wc)
+    local dir = player_.facingRight and 1 or -1
+    local len = GetThrustLength(progress)
+    local tipX = originX + dir * len
+    local tipY = originY
+
+    -- 武器形状（尖端朝刺出方向）
+    local weaponAngle = player_.facingRight and (math.pi / 2) or (-math.pi / 2)
+    local flipX = not player_.facingRight
+    RenderWeaponShape(vg, originX + dir * len * 0.5, originY, weaponAngle, wc, 0.8 * physScale_, flipX)
+
+    -- 突刺轨迹线
+    nvgBeginPath(vg)
+    nvgMoveTo(vg, originX, originY)
+    nvgLineTo(vg, tipX, tipY)
+    nvgStrokeColor(vg, nvgRGBA(wc[1], wc[2], wc[3], 120))
+    nvgStrokeWidth(vg, 3)
+    nvgLineCap(vg, NVG_ROUND)
+    nvgStroke(vg)
+
+    -- 尖端闪光
+    nvgBeginPath(vg)
+    nvgCircle(vg, tipX, tipY, 4 * (1 - progress) * physScale_)
+    nvgFillColor(vg, nvgRGBA(255, 255, 255, math.floor(200 * (1 - progress))))
+    nvgFill(vg)
+end
+
+--- 渲染挥动攻击（武器绕原点旋转）
+RenderSwingAttack = function(vg, atk, progress, originX, originY, wc)
+    local range = atk.range * physScale_
+    local easedProgress = 1.0 - (1.0 - progress) * (1.0 - progress)
+    local arcDir = (atk.direction or 1)
+    local startAngle = math.rad(atk.startAngle or -60)
+    local sweepAngle = math.rad(atk.arc) * arcDir * easedProgress
+
+    -- 角度计算：朝右从startAngle顺时针扫；朝左镜像
+    local currentAngle
+    if player_.facingRight then
+        currentAngle = startAngle + sweepAngle
+    else
+        currentAngle = math.pi - (startAngle + sweepAngle)
+    end
+
+    local tipX = originX + math.cos(currentAngle) * range
+    local tipY = originY + math.sin(currentAngle) * range
+
+    -- 挥动轨迹（半透明扇形）
+    local trailAlpha = math.floor((1 - progress) * 40)
+    nvgBeginPath(vg)
+    nvgMoveTo(vg, originX, originY)
+    local steps = 10
+    for s = 0, steps do
+        local t = easedProgress * s / steps
+        local a
+        if player_.facingRight then
+            a = startAngle + math.rad(atk.arc) * arcDir * t
+        else
+            a = math.pi - (startAngle + math.rad(atk.arc) * arcDir * t)
+        end
+        nvgLineTo(vg, originX + math.cos(a) * range, originY + math.sin(a) * range)
+    end
+    nvgClosePath(vg)
+    nvgFillColor(vg, nvgRGBA(wc[1], wc[2], wc[3], trailAlpha))
+    nvgFill(vg)
+
+    -- 武器形状（刃面朝外、柄面朝自己）
+    local weaponAngle = currentAngle + math.pi / 2
+    local weaponX = originX + math.cos(currentAngle) * range * 0.6
+    local weaponY = originY + math.sin(currentAngle) * range * 0.6
+    local flipX = not player_.facingRight
+    RenderWeaponShape(vg, weaponX, weaponY, weaponAngle, wc, 1.0 * physScale_, flipX)
+
+    -- 刃尖光芒
+    local glowAlpha = math.floor(180 * (1 - progress))
+    nvgBeginPath(vg)
+    nvgCircle(vg, tipX, tipY, 5 * (1 - progress * 0.5) * physScale_)
+    nvgFillColor(vg, nvgRGBA(255, 255, 255, glowAlpha))
+    nvgFill(vg)
+end
+
+--- 渲染攻击效果（入口分派）
 RenderAttack = function(vg)
     if not attacking_ or not currentAttack_ then return end
-    
+
     local atk = currentAttack_
     local progress = attackTimer_ / attackDuration_
     local dir = player_.facingRight and 1 or -1
     local originX = player_.x + player_.width / 2 + dir * 10 * physScale_
     local originY = player_.y + player_.height * 0.4
     local wc = gameData_.weaponData and gameData_.weaponData.typeInfo.color or {200, 200, 200}
-    
+
     if atk.isThrust then
-        -- 突刺：武器沿水平方向延伸
-        local len = GetThrustLength(progress)
-        local tipX = originX + dir * len
-        local tipY = originY
-        
-        -- 渲染玩家绘制的武器形状（朝角色面朝方向水平刺出）
-        -- 尖端朝刺出方向：朝右+π/2，朝左-π/2；flipX 镜像形状
-        local weaponAngle = player_.facingRight and (math.pi / 2) or (-math.pi / 2)
-        local flipX = not player_.facingRight
-        RenderWeaponShape(vg, originX + dir * len * 0.5, originY, weaponAngle, wc, 0.8 * physScale_, flipX)
-        
-        -- 突刺轨迹线
-        nvgBeginPath(vg)
-        nvgMoveTo(vg, originX, originY)
-        nvgLineTo(vg, tipX, tipY)
-        nvgStrokeColor(vg, nvgRGBA(wc[1], wc[2], wc[3], 120))
-        nvgStrokeWidth(vg, 3)
-        nvgLineCap(vg, NVG_ROUND)
-        nvgStroke(vg)
-        
-        -- 尖端闪光
-        nvgBeginPath(vg)
-        nvgCircle(vg, tipX, tipY, 4 * (1 - progress) * physScale_)
-        nvgFillColor(vg, nvgRGBA(255, 255, 255, math.floor(200 * (1 - progress))))
-        nvgFill(vg)
+        RenderThrustAttack(vg, atk, progress, originX, originY, wc)
     else
-        -- 挥动：武器绕原点旋转
-        local range = atk.range * physScale_
-        local easedProgress = 1.0 - (1.0 - progress) * (1.0 - progress)
-        local arcDir = (atk.direction or 1)
-        local startAngle = math.rad(atk.startAngle or -60)
-        local sweepAngle = math.rad(atk.arc) * arcDir * easedProgress
-        
-        -- 角度计算：朝右时从startAngle开始顺时针扫；朝左时镜像
-        local currentAngle
-        if player_.facingRight then
-            currentAngle = startAngle + sweepAngle
-        else
-            -- 朝左时镜像：基础角度翻转到 pi 侧，扫动方向反转
-            currentAngle = math.pi - (startAngle + sweepAngle)
-        end
-        
-        local tipX = originX + math.cos(currentAngle) * range
-        local tipY = originY + math.sin(currentAngle) * range
-        
-        -- 挥动轨迹（半透明扇形）
-        local trailAlpha = math.floor((1 - progress) * 40)
-        nvgBeginPath(vg)
-        nvgMoveTo(vg, originX, originY)
-        local steps = 10
-        for s = 0, steps do
-            local t = easedProgress * s / steps
-            local a
-            if player_.facingRight then
-                a = startAngle + math.rad(atk.arc) * arcDir * t
-            else
-                a = math.pi - (startAngle + math.rad(atk.arc) * arcDir * t)
-            end
-            nvgLineTo(vg, originX + math.cos(a) * range, originY + math.sin(a) * range)
-        end
-        nvgClosePath(vg)
-        nvgFillColor(vg, nvgRGBA(wc[1], wc[2], wc[3], trailAlpha))
-        nvgFill(vg)
-        
-        -- 渲染玩家绘制的武器形状（在挥动路径上，刃面朝外、柄面朝自己）
-        -- +π/2 保证刃端沿 currentAngle 方向朝外；朝左时 X 轴翻转实现镜像
-        local weaponAngle = currentAngle + math.pi / 2
-        local weaponX = originX + math.cos(currentAngle) * range * 0.6
-        local weaponY = originY + math.sin(currentAngle) * range * 0.6
-        local flipX = not player_.facingRight
-        RenderWeaponShape(vg, weaponX, weaponY, weaponAngle, wc, 1.0 * physScale_, flipX)
-        
-        -- 刃尖光芒
-        local glowAlpha = math.floor(180 * (1 - progress))
-        nvgBeginPath(vg)
-        nvgCircle(vg, tipX, tipY, 5 * (1 - progress * 0.5) * physScale_)
-        nvgFillColor(vg, nvgRGBA(255, 255, 255, glowAlpha))
-        nvgFill(vg)
+        RenderSwingAttack(vg, atk, progress, originX, originY, wc)
     end
 end
 
@@ -1421,93 +1427,82 @@ RenderDefaultWeapon = function(vg, cx, cy, angle, color)
     nvgRestore(vg)
 end
 
---- 渲染玩家（带程序化动画）
-RenderPlayer = function(vg)
-    local px = player_.x
-    local py = player_.y
-    local pw = player_.width
-    local ph = player_.height
+--- 计算玩家程序化动画参数（弹跳、倾斜、缩放）
+--- @return number bobY, number lean, number scaleX, number scaleY
+CalcPlayerAnimParams = function()
     local state = player_.state
     local t = player_.animTime
-    
-    -- === 程序化动画参数计算 ===
-    local bobY = 0        -- 上下弹跳偏移
-    local lean = 0        -- 倾斜角度(弧度)
-    local scaleX = 1.0    -- 水平缩放（挤压拉伸）
-    local scaleY = 1.0    -- 垂直缩放
-    
+    local bobY = 0
+    local lean = 0
+    local scaleX = 1.0
+    local scaleY = 1.0
+
     if state == "run" then
-        -- 跑步：上下弹跳 + 身体前倾 + 轻微挤压节奏
         bobY = math.sin(t) * 3 * physScale_
-        lean = (player_.facingRight and 1 or -1) * 0.06  -- 前倾约3.4°
-        local squishPhase = math.sin(t * 2)  -- 双倍频率的微小挤压
+        lean = (player_.facingRight and 1 or -1) * 0.06
+        local squishPhase = math.sin(t * 2)
         scaleX = 1.0 + squishPhase * 0.03
         scaleY = 1.0 - squishPhase * 0.03
     elseif state == "idle" then
-        -- 待机：轻微呼吸起伏
         bobY = math.sin(t) * 1 * physScale_
         scaleY = 1.0 + math.sin(t) * 0.015
         scaleX = 1.0 - math.sin(t) * 0.01
     end
-    
-    -- 着地压缩回弹（完整弹性曲线：压缩→回弹→恢复）
+
+    -- 着地压缩回弹（弹性曲线：压缩→回弹→恢复）
     if player_.landSquash > 0 then
-        local total = 0.15  -- 总时长缩短为0.15秒
-        local t_norm = 1.0 - (player_.landSquash / total)  -- 0→1 进度
-        -- 弹性曲线：先压缩再回弹
+        local total = 0.15
+        local t_norm = 1.0 - (player_.landSquash / total)
         local squash
         if t_norm < 0.35 then
-            -- 前35%：快速压缩（0→最大压缩）
             squash = (t_norm / 0.35) * 0.12
         elseif t_norm < 0.65 then
-            -- 中间30%：回弹（压缩→拉伸）
             local p = (t_norm - 0.35) / 0.3
-            squash = 0.12 * (1.0 - p * 2.0)  -- 0.12 → -0.12
+            squash = 0.12 * (1.0 - p * 2.0)
         else
-            -- 后35%：恢复到正常
             local p = (t_norm - 0.65) / 0.35
-            squash = -0.12 * (1.0 - p)  -- -0.12 → 0
+            squash = -0.12 * (1.0 - p)
         end
         scaleX = 1.0 + squash * 0.5
         scaleY = 1.0 - squash
     end
-    
-    -- === 渲染角色精灵 ===
+
+    return bobY, lean, scaleX, scaleY
+end
+
+--- 渲染玩家精灵（含帧选择和变换）
+RenderPlayerSprite = function(vg, bobY, lean, scaleX, scaleY)
+    local px = player_.x
+    local py = player_.y
+    local pw = player_.width
+    local ph = player_.height
+
     -- 根据状态选择当前显示帧
-    local currentFrame = playerImage_  -- 默认待机帧
-    if state == "run" and #playerRunFrames_ > 0 then
+    local currentFrame = playerImage_
+    if player_.state == "run" and #playerRunFrames_ > 0 then
         local idx = math.max(1, math.min(playerFrameIndex_, #playerRunFrames_))
         local frame = playerRunFrames_[idx]
         if frame and frame ~= 0 then
-            -- 检查帧图片是否真正加载完成（异步加载时尺寸为0）
             local fw, fh = nvgImageSize(vg, frame)
             if fw > 0 and fh > 0 then
                 currentFrame = frame
             end
         end
     end
-    
+
     if currentFrame and currentFrame ~= 0 then
         nvgSave(vg)
-        local imgSize = ph / scaleY  -- 基准图片尺寸（补偿缩放）
-        
-        -- 以角色脚底中心为锚点进行变换
+        local imgSize = ph / scaleY
+
         local anchorX = px + pw / 2
-        local anchorY = py + ph  -- 脚底
-        
+        local anchorY = py + ph
         nvgTranslate(vg, anchorX, anchorY + bobY)
         nvgRotate(vg, lean)
         nvgScale(vg, scaleX, scaleY)
-        
-        -- 翻转处理
-        if player_.facingRight then
-            nvgScale(vg, -1, 1)
-        end
-        
-        -- 从锚点(脚底中心)偏移到图片左上角
+        if player_.facingRight then nvgScale(vg, -1, 1) end
+
         local drawX = -imgSize / 2
         local drawY = -imgSize
-        
         local imgPaint = nvgImagePattern(vg, drawX, drawY, imgSize, imgSize, 0, currentFrame, 1.0)
         nvgBeginPath(vg)
         nvgRect(vg, drawX, drawY, imgSize, imgSize)
@@ -1524,26 +1519,34 @@ RenderPlayer = function(vg)
         nvgStrokeWidth(vg, 2)
         nvgStroke(vg)
     end
-    
-    -- === 跑步烟尘粒子 ===
-    if state == "run" and player_.onGround then
-        local footX = px + pw / 2
-        local footY = py + ph + bobY
-        -- 每半个周期产生一个小烟尘
-        local dustPhase = math.sin(t + 1.5)
-        if dustPhase > 0.7 then
-            local alpha = math.floor((dustPhase - 0.7) / 0.3 * 80)
-            local dustDir = player_.facingRight and -1 or 1
-            nvgBeginPath(vg)
-            nvgCircle(vg, footX + dustDir * 6 * physScale_, footY - 2 * physScale_, 3 * physScale_)
-            nvgFillColor(vg, nvgRGBA(200, 180, 150, alpha))
-            nvgFill(vg)
-            nvgBeginPath(vg)
-            nvgCircle(vg, footX + dustDir * 12 * physScale_, footY - 4 * physScale_, 2 * physScale_)
-            nvgFillColor(vg, nvgRGBA(200, 180, 150, math.floor(alpha * 0.6)))
-            nvgFill(vg)
-        end
+end
+
+--- 渲染跑步烟尘粒子
+RenderRunDust = function(vg, bobY)
+    if player_.state ~= "run" or not player_.onGround then return end
+
+    local footX = player_.x + player_.width / 2
+    local footY = player_.y + player_.height + bobY
+    local dustPhase = math.sin(player_.animTime + 1.5)
+    if dustPhase > 0.7 then
+        local alpha = math.floor((dustPhase - 0.7) / 0.3 * 80)
+        local dustDir = player_.facingRight and -1 or 1
+        nvgBeginPath(vg)
+        nvgCircle(vg, footX + dustDir * 6 * physScale_, footY - 2 * physScale_, 3 * physScale_)
+        nvgFillColor(vg, nvgRGBA(200, 180, 150, alpha))
+        nvgFill(vg)
+        nvgBeginPath(vg)
+        nvgCircle(vg, footX + dustDir * 12 * physScale_, footY - 4 * physScale_, 2 * physScale_)
+        nvgFillColor(vg, nvgRGBA(200, 180, 150, math.floor(alpha * 0.6)))
+        nvgFill(vg)
     end
+end
+
+--- 渲染玩家（入口：动画参数 → 精灵 → 烟尘）
+RenderPlayer = function(vg)
+    local bobY, lean, scaleX, scaleY = CalcPlayerAnimParams()
+    RenderPlayerSprite(vg, bobY, lean, scaleX, scaleY)
+    RenderRunDust(vg, bobY)
 end
 
 --- 命中特效渲染

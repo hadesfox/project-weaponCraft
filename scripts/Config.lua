@@ -43,9 +43,9 @@ Config.WeaponTypes = {
 Config.Forge = {
     HammerDuration = 10.0,   -- 锤击阶段时长（秒）
     QuenchDuration = 5.0,    -- 淬火阶段时长（秒）
-    HammerBeatInterval = 0.8, -- 锤击节拍间隔
-    PerfectWindow = 0.15,    -- 完美判定窗口（秒）
-    GoodWindow = 0.3,        -- 良好判定窗口（秒）
+    PerfectHalf = 0.10,      -- 完美判定区域半宽（占节奏条比例）
+    GoodHalf = 0.40,         -- 良好判定区域半宽（占节奏条比例）
+    ZoneMargin = 0.40,       -- 判定区域随机范围边距
     FinishDelay = 1.5,       -- 锻造完成后延迟过渡（秒）
 }
 
@@ -74,6 +74,12 @@ Config.Trial = {
     
     -- 主角图片
     PlayerImage = "image/主角_锻造师_20260530003547.png",
+    RunFrames = {
+        "image/run_frame_A_20260530070458.png",  -- 右腿前迈，左腿后蹬
+        "image/run_frame_B_20260530070453.png",  -- 过渡（双腿收拢，身体上弹）
+        "image/run_frame_C_20260530070452.png",  -- 左腿前迈，右腿后蹬
+        "image/run_frame_D_20260530070559.png",  -- 过渡（双腿收拢，身体下沉）
+    },
 }
 
 -- 武器攻击配置（每种武器的攻击招式）
