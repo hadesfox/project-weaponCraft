@@ -1,5 +1,5 @@
 -- ============================================================================
--- States/ForgeState.lua - 锻造阶段状态
+-- States/ForgeState.lua - 锻造阶段状态（自适应布局修复版）
 -- 包含两个简单小游戏：锤击（节奏点击）和 淬火（温度控制）
 -- ============================================================================
 
@@ -11,57 +11,57 @@ local ForgeState = {}
 
 -- 颜色缓存（从 Config.Colors 统一引用，避免魔法数字）
 local C_SUCCESS = Config.Colors.Success
-local C_DANGER = Config.Colors.Danger
-local C_GOLD = Config.Colors.Gold
+local C_DANGER  = Config.Colors.Danger
+local C_GOLD     = Config.Colors.Gold
 
 local gameData_ = nil
 local onComplete_ = nil
 
 -- 音效
-local hammerSound_ = nil
+local hammerSound_  = nil
 local quenchSound_ = nil
-local audioScene_ = nil
-local audioNode_ = nil
+local audioScene_   = nil
+local audioNode_    = nil
 local hammerSource_ = nil  -- 锤击音源（预创建，复用）
 local quenchSource_ = nil  -- 淬火循环音源（预创建，复用）
 
 -- 锻造阶段
-local PHASE_HAMMER = 1   -- 锤击
-local PHASE_QUENCH = 2   -- 淬火
-local PHASE_DONE = 3
+local PHASE_HAMMER  = 1   -- 锤击
+local PHASE_QUENCH  = 2   -- 淬火
+local PHASE_DONE     = 3
 
-local currentPhase_ = PHASE_HAMMER
-local phaseTimer_ = 0
-local totalScore_ = 0
+local currentPhase_    = PHASE_HAMMER
+local phaseTimer_      = 0
+local totalScore_      = 0
 
 -- 锤击阶段变量
-local HAMMER_MAX_HITS = 5    -- 总共5次锤击
-local hammerHits_ = 0        -- 已锤击次数
-local hammerFlash_ = 0       -- 命中闪光效果
-local hammerShake_ = 0       -- 铁砧震动效果
-local hammerRhythm_ = 0      -- 节奏指示器当前位置 (0~1循环)
-local hammerRhythmSpeed_ = 1.2  -- 节奏速度（秒/周期）
-local hammerHitQuality_ = {}  -- 每次锤击的评分 (perfect/good/ok)
-local hammerReady_ = true    -- 是否准备好接受下一次锤击（冷却中为false）
-local hammerCooldown_ = 0    -- 锤击后短暂冷却
-local hammerDone_ = false    -- 锤击是否已完成（等待展示结果）
-local hammerResultTimer_ = 0 -- 锤击结果展示倒计时
-local hammerScore_ = 0       -- 锤击阶段得分（用于展示）
-local hammerWaitClick_ = false -- 锤击结果展示完毕后，等待玩家点击进入淬火
-local hammerTimeLeft_ = 0    -- 锤击阶段剩余时间
-local hammerZoneCenter_ = 0  -- 判定区域中心位置（-1~1范围内随机）
+local HAMMER_MAX_HITS    = 5     -- 总共5次锤击
+local hammerHits_        = 0      -- 已锤击次数
+local hammerFlash_       = 0      -- 命中闪光效果
+local hammerShake_       = 0      -- 铁砧震动效果
+local hammerRhythm_      = 0      -- 节奏指示器当前位置 (0~1循环)
+local hammerRhythmSpeed_ = 1.2    -- 节奏速度（秒/周期）
+local hammerHitQuality_  = {}     -- 每次锤击的评分 (perfect/good/ok)
+local hammerReady_       = true    -- 是否准备好接受下一次锤击（冷却中为false）
+local hammerCooldown_    = 0      -- 锤击后短暂冷却
+local hammerDone_        = false   -- 锤击是否已完成（等待展示结果）
+local hammerResultTimer_  = 0      -- 锤击结果展示倒计时
+local hammerScore_        = 0      -- 锤击阶段得分（用于展示）
+local hammerWaitClick_    = false   -- 锤击结果展示完毕后，等待玩家点击进入淬火
+local hammerTimeLeft_     = 0      -- 锤击阶段剩余时间
+local hammerZoneCenter_   = 0      -- 判定区域中心位置（-1~1范围内随机）
 local HAMMER_RESULT_DURATION = 1.0  -- 锤击结果展示时间（秒）
 
 -- 淬火阶段变量
-local QUENCH_TIME_LIMIT = 5.0  -- 淬火时间限制（秒）
-local quenchTemp_ = 800      -- 当前温度
-local quenchTarget_ = 450    -- 目标温度
-local quenchTolerance_ = 30  -- 目标容差范围（±30度内为完美）
-local quenchHolding_ = false -- 是否正在按住冷却
-local quenchHoldTime_ = 0    -- 本次按住持续时间（用于加速降温）
-local quenchScore_ = 0       -- 淬火评分
-local quenchDone_ = false
-local quenchTimer_ = 0       -- 淬火已用时间
+local QUENCH_TIME_LIMIT = 5.0    -- 淬火时间限制（秒）
+local quenchTemp_        = 800    -- 当前温度
+local quenchTarget_      = 450    -- 目标温度
+local quenchTolerance_   = 30     -- 目标容差范围（±30度内为完美）
+local quenchHolding_     = false   -- 是否正在按住冷却
+local quenchHoldTime_    = 0      -- 本次按住持续时间（用于加速降温）
+local quenchScore_       = 0      -- 淬火评分
+local quenchDone_        = false
+local quenchTimer_       = 0      -- 淬火已用时间
 
 -- 延迟结束计时器（替代旧的匿名事件订阅）
 local finishTimer_ = -1      -- <0 表示未激活
@@ -82,18 +82,19 @@ local OnForgeInputRelease
 local RenderHammerPhase
 local RenderQuenchPhase
 
+
 --- 进入锻造状态
 function ForgeState.Enter(gameData, onComplete)
-    gameData_ = gameData
-    onComplete_ = onComplete
+    gameData_    = gameData
+    onComplete_  = onComplete
     currentPhase_ = PHASE_HAMMER
-    phaseTimer_ = 0
-    totalScore_ = 0
-    finishTimer_ = -1
+    phaseTimer_   = 0
+    totalScore_   = 0
+    finishTimer_  = -1
     
     -- 预创建音频节点和音源（避免首次播放延迟）
     audioScene_ = Scene()
-    audioNode_ = audioScene_:CreateChild("ForgeSFX")
+    audioNode_  = audioScene_:CreateChild("ForgeSFX")
     
     -- 加载音效
     hammerSound_ = cache:GetResource("Sound", "audio/sfx/forge_hammer_hit.ogg")
@@ -126,9 +127,10 @@ function ForgeState.Enter(gameData, onComplete)
     print("[ForgeState] Entered. Weapon type: " .. tostring(gameData_.weaponType))
 end
 
+
 --- 离开锻造状态
 function ForgeState.Leave()
-    finishTimer_ = -1
+    finishTimer_   = -1
     quenchHolding_ = false
     StopQuenchSound()
     hammerSource_ = nil
@@ -143,52 +145,56 @@ function ForgeState.Leave()
     end
 end
 
+
 --- 随机生成判定区域位置
 --- 区域结构：perfect(10%) + good两侧(30%) = 40%，需确保全部在[-1,1]内
 local PERFECT_HALF = Config.Forge.PerfectHalf
-local GOOD_HALF = Config.Forge.GoodHalf
-local ZONE_MARGIN = Config.Forge.ZoneMargin
+local GOOD_HALF    = Config.Forge.GoodHalf
+local ZONE_MARGIN  = Config.Forge.ZoneMargin
 
 local function RandomizeZoneCenter()
     -- 区域中心范围：[-0.60, 0.60]
     hammerZoneCenter_ = (math.random() * 2 - 1) * (1.0 - ZONE_MARGIN)
 end
 
+
 --- 初始化锤击阶段
 InitHammerPhase = function()
-    hammerHits_ = 0
-    hammerFlash_ = 0
-    hammerShake_ = 0
-    hammerRhythm_ = 0
-    hammerHitQuality_ = {}
-    hammerReady_ = true
-    hammerCooldown_ = 0
-    hammerDone_ = false
-    hammerWaitClick_ = false
-    hammerResultTimer_ = 0
-    hammerScore_ = 0
-    hammerTimeLeft_ = Config.Forge.HammerDuration
-    phaseTimer_ = 0
+    hammerHits_       = 0
+    hammerFlash_      = 0
+    hammerShake_       = 0
+    hammerRhythm_      = 0
+    hammerHitQuality_  = {}
+    hammerReady_       = true
+    hammerCooldown_    = 0
+    hammerDone_        = false
+    hammerWaitClick_   = false
+    hammerResultTimer_  = 0
+    hammerScore_        = 0
+    hammerTimeLeft_     = Config.Forge.HammerDuration
+    phaseTimer_        = 0
     RandomizeZoneCenter()
     
     print("[Forge/Hammer] Ready for " .. HAMMER_MAX_HITS .. " strikes, time limit: " .. Config.Forge.HammerDuration .. "s")
 end
 
+
 --- 初始化淬火阶段
 ---@diagnostic disable-next-line: redefined-local
 InitQuenchPhase = function()
-    quenchTemp_ = 800 + math.random(0, 100)  -- 随机起始温度
-    quenchTarget_ = 300 + math.random(0, 200) -- 随机目标（300~500）
+    quenchTemp_     = 800 + math.random(0, 100)  -- 随机起始温度
+    quenchTarget_    = 300 + math.random(0, 200)  -- 随机目标（300~500）
     quenchTolerance_ = 30
-    quenchHolding_ = false
-    quenchHoldTime_ = 0
-    quenchScore_ = 0
-    quenchDone_ = false
-    quenchTimer_ = 0
-    phaseTimer_ = 0
+    quenchHolding_   = false
+    quenchHoldTime_  = 0
+    quenchScore_     = 0
+    quenchDone_      = false
+    quenchTimer_     = 0
+    phaseTimer_      = 0
     
     print("[Forge/Quench] Start temp: " .. quenchTemp_ .. " Target: " .. quenchTarget_)
 end
+
 
 --- 构建锻造 UI
 function ForgeState.BuildUI()
@@ -242,6 +248,7 @@ function ForgeState.BuildUI()
     }
 end
 
+
 --- 更新
 function ForgeState.Update(dt)
     -- 延迟结束计时器
@@ -253,7 +260,7 @@ function ForgeState.Update(dt)
         end
         return  -- 等待结束期间不再更新游戏逻辑
     end
-
+    
     phaseTimer_ = phaseTimer_ + dt
     
     if currentPhase_ == PHASE_HAMMER then
@@ -262,6 +269,7 @@ function ForgeState.Update(dt)
         UpdateQuench(dt)
     end
 end
+
 
 --- 计算锤击得分并进入结果展示
 FinalizeHammer = function()
@@ -281,7 +289,7 @@ FinalizeHammer = function()
             end
         end
         -- 基础质量分 × 完成率
-        local qualityAvg = totalQuality / hitCount
+        local qualityAvg   = totalQuality / hitCount
         local completionRate = hitCount / HAMMER_MAX_HITS
         hammerScore_ = math.floor(qualityAvg * completionRate)
     end
@@ -292,6 +300,7 @@ FinalizeHammer = function()
     
     print("[Forge/Hammer] Done! Hits: " .. hitCount .. "/" .. HAMMER_MAX_HITS .. " Score: " .. hammerScore_)
 end
+
 
 --- 锤击更新
 UpdateHammer = function(dt)
@@ -338,6 +347,7 @@ UpdateHammer = function(dt)
     end
 end
 
+
 --- 评估锤击时机质量
 --- rhythmPos = sin(...) 范围 -1~1，光标位置：0=中心，±1=边缘
 --- 黄色中心 = perfect，灰色中间 = good，黑色边缘 = miss
@@ -354,6 +364,7 @@ EvaluateHammerTiming = function()
         return "miss"      -- 光标在黑色区域(60%)
     end
 end
+
 
 --- 淬火更新
 UpdateQuench = function(dt)
@@ -383,10 +394,11 @@ UpdateQuench = function(dt)
     end
 end
 
+
 --- 结束淬火，计算得分
 FinishQuench = function()
     if quenchDone_ then return end
-    quenchDone_ = true
+    quenchDone_  = true
     quenchHolding_ = false
     StopQuenchSound()
     
@@ -428,6 +440,7 @@ FinishQuench = function()
     finishTimer_ = 0
 end
 
+
 --- 播放锤击音效（复用预创建音源，无首次延迟）
 ---@diagnostic disable-next-line: redefined-local
 PlayHammerSound = function()
@@ -435,6 +448,7 @@ PlayHammerSound = function()
     hammerSource_.gain = 1.0
     hammerSource_:Play(hammerSound_)
 end
+
 
 --- 开始播放淬火循环音效（复用预创建音源，无首次延迟）
 ---@diagnostic disable-next-line: redefined-local
@@ -445,6 +459,7 @@ StartQuenchSound = function()
     quenchSource_:Play(quenchSound_)
 end
 
+
 --- 停止淬火循环音效
 ---@diagnostic disable-next-line: redefined-local
 StopQuenchSound = function()
@@ -454,10 +469,11 @@ StopQuenchSound = function()
     end
 end
 
+
 --- 处理玩家点击（锤击判定）
 OnForgeInput = function()
     if finishTimer_ >= 0 then return end  -- 等待结束中忽略输入
-
+    
     if currentPhase_ == PHASE_HAMMER then
         -- 锤击完成后等待点击进入淬火
         if hammerWaitClick_ then
@@ -478,18 +494,18 @@ OnForgeInput = function()
             -- 视觉反馈强度根据时机质量变化
             if quality == "perfect" then
                 hammerFlash_ = 1.0
-                hammerShake_ = 1.0
+                hammerShake_  = 1.0
             elseif quality == "good" then
                 hammerFlash_ = 0.7
-                hammerShake_ = 0.7
+                hammerShake_  = 0.7
             else
                 -- miss: 微弱反馈
                 hammerFlash_ = 0.3
-                hammerShake_ = 0.2
+                hammerShake_  = 0.2
             end
             
             -- 短暂冷却防止连点
-            hammerReady_ = false
+            hammerReady_     = false
             hammerCooldown_ = 0.3
             
             PlayHammerSound()
@@ -502,6 +518,7 @@ OnForgeInput = function()
     end
 end
 
+
 OnForgeInputRelease = function()
     if currentPhase_ == PHASE_QUENCH and not quenchDone_ then
         -- 松开即结束淬火（与超时效果相同）
@@ -510,6 +527,7 @@ OnForgeInputRelease = function()
         end
     end
 end
+
 
 --- 按键
 function ForgeState.OnKeyDown(key)
@@ -523,6 +541,7 @@ function ForgeState.OnKeyUp(key)
         OnForgeInputRelease()
     end
 end
+
 
 -- ============================================================================
 -- 输入（由 main.lua 分发）
@@ -554,16 +573,17 @@ function ForgeState.OnTouchEnd(x, y)
     OnForgeInputRelease()
 end
 
+
 -- ============================================================================
 -- NanoVG 渲染（由 main.lua HandleNanoVGRender 调用）
 -- ============================================================================
 
 function ForgeState.Render(vg)
-    local w = graphics:GetWidth()
-    local h = graphics:GetHeight()
+    local w   = graphics:GetWidth()
+    local h   = graphics:GetHeight()
     local dpr = graphics:GetDPR()
-    local lw = w / dpr
-    local lh = h / dpr
+    local lw  = w / dpr
+    local lh  = h / dpr
     
     nvgBeginFrame(vg, w, h, 1.0)
     nvgScale(vg, dpr, dpr)
@@ -588,6 +608,7 @@ function ForgeState.Render(vg)
     nvgResetTransform(vg)
     nvgEndFrame(vg)
 end
+
 
 --- 渲染铁砧和锤子动画
 local function RenderAnvilAndHammer(vg, cx, cy, shakeX, shakeY)
@@ -631,6 +652,7 @@ local function RenderAnvilAndHammer(vg, cx, cy, shakeX, shakeY)
     nvgFillColor(vg, nvgRGBA(160, 150, 140, 255))
     nvgFill(vg)
 end
+
 
 --- 渲染节奏指示条（判定区域 + 移动光标）
 local function RenderRhythmBar(vg, cx, cy)
@@ -705,6 +727,7 @@ local function RenderRhythmBar(vg, cx, cy)
     end
 end
 
+
 --- 渲染锤击进度圆点
 local function RenderHammerDots(vg, cx, cy)
     local dotSpacing = 32
@@ -737,6 +760,7 @@ local function RenderHammerDots(vg, cx, cy)
     
     return dotsY
 end
+
 
 --- 渲染锤击 HUD（倒计时、结果面板、提示、反馈）
 local function RenderHammerHUD(vg, w, cx, cy, dotsY)
@@ -840,6 +864,7 @@ local function RenderHammerHUD(vg, w, cx, cy, dotsY)
     end
 end
 
+
 --- 锤击阶段主渲染入口
 RenderHammerPhase = function(vg, w, h)
     local cx = w / 2
@@ -859,11 +884,15 @@ RenderHammerPhase = function(vg, w, h)
     RenderHammerHUD(vg, w, cx, cy, dotsY)
 end
 
---- 渲染淬火倒计时
-local function RenderQuenchCountdown(vg, cx, cy, fontId)
+
+-- ============================================================================
+-- 淬火阶段渲染（自适应布局，适配任意宽高比）
+-- ============================================================================
+
+--- 渲染淬火倒计时（位置由参数指定，不再依赖 cy）
+local function RenderQuenchCountdown(vg, cx, countdownY, fontId)
     local remaining = math.max(0, QUENCH_TIME_LIMIT - quenchTimer_)
     local countdownText = string.format("%.1f", remaining)
-    local countdownY = cy - 100
     local pulseScale = 1.0
     if remaining < 1.0 and not quenchDone_ then
         pulseScale = 1.0 + math.sin(phaseTimer_ * 12) * 0.08
@@ -891,44 +920,41 @@ local function RenderQuenchCountdown(vg, cx, cy, fontId)
     end
 end
 
---- 渲染温度计（温度条 + 目标线 + 当前温度）
-local function RenderThermometer(vg, cx, cy, fontId)
-    local barW = 44
-    local barH = 180
-    local barX = cx - barW / 2
-    local barY = cy - 30
-    
+
+--- 渲染温度计（高度和位置完全自适应屏幕高度 h）
+---@return number 温度计底部的 Y 坐标（用于紧接着渲染提示文字）
+local function RenderThermometer(vg, cx, barY, maxBarH, barW, fontId)
     -- 背景
     nvgBeginPath(vg)
-    nvgRoundedRect(vg, barX - 4, barY - 4, barW + 8, barH + 8, 8)
+    nvgRoundedRect(vg, barX - 4, barY - 4, barW + 8, maxBarH + 8, 8)
     nvgFillColor(vg, nvgRGBA(50, 50, 55, 255))
     nvgFill(vg)
     
     -- 温度填充
     local maxTemp = 900
     local fillRatio = math.max(0, math.min(1, quenchTemp_ / maxTemp))
-    local fillH = barH * fillRatio
+    local fillH = maxBarH * fillRatio
     
     local r, g, b
     if fillRatio > 0.6 then
         r, g, b = 200, 80, 40      -- 炭火红（高温）
     elseif fillRatio > 0.3 then
-        r, g, b = 160, 140, 90     -- 旧金（中温）
+        r, g, b = 160, 140, 90     -- 金黄（中温）
     else
         r, g, b = 150, 200, 255    -- 冰霜蓝（低温）
     end
     
     nvgBeginPath(vg)
-    nvgRoundedRect(vg, barX, barY + (barH - fillH), barW, fillH, 4)
+    nvgRoundedRect(vg, barX, barY + (maxBarH - fillH), barW, fillH, 4)
     nvgFillColor(vg, nvgRGBA(r, g, b, 230))
     nvgFill(vg)
     
     -- 目标区域高亮
     local targetRatio = quenchTarget_ / maxTemp
-    local targetY = barY + barH * (1 - targetRatio)
-    local tolRatioHalf = (quenchTolerance_ / maxTemp) * barH
+    local targetY    = barY + maxBarH * (1 - targetRatio)
+    local tolPixel   = (quenchTolerance_ / maxTemp) * maxBarH
     nvgBeginPath(vg)
-    nvgRect(vg, barX - 12, targetY - tolRatioHalf, barW + 24, tolRatioHalf * 2)
+    nvgRect(vg, barX - 12, targetY - tolPixel, barW + 24, tolPixel * 2)
     nvgFillColor(vg, nvgRGBA(150, 200, 255, 35))
     nvgFill(vg)
     
@@ -947,18 +973,27 @@ local function RenderThermometer(vg, cx, cy, fontId)
     nvgFillColor(vg, nvgRGBA(150, 200, 255, 255))
     nvgText(vg, barX + barW + 20, targetY, math.floor(quenchTarget_) .. "°", nil)
     
-    -- 当前温度数字
-    nvgFontSize(vg, 22)
+    -- 当前温度数字（显示在温度计正下方，自适应字体大小）
+    local tempFontSize = math.min(22, math.floor(maxBarH * 0.12))
+    if tempFontSize < 12 then tempFontSize = 12 end
+    nvgFontSize(vg, tempFontSize)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
     nvgFillColor(vg, nvgRGBA(r, g, b, 255))
-    nvgText(vg, cx, barY + barH + 14, math.floor(quenchTemp_) .. "°", nil)
+    nvgText(vg, cx, barY + maxBarH + 10, math.floor(quenchTemp_) .. "°", nil)
     
-    return barY + barH  -- 返回底部 Y 坐标，供状态提示使用
+    return barY + maxBarH + 10 + tempFontSize + 8  -- 返回提示文字的合理起始 Y
 end
 
---- 渲染淬火状态提示
-local function RenderQuenchStatus(vg, cx, barBottom)
+
+--- 渲染淬火状态提示（自适应，确保不超出屏幕底部）
+local function RenderQuenchStatus(vg, cx, textStartY, h, fontId)
+    -- 确保提示文字在屏幕内：若 textStartY 太接近底部，则向上收
+    local bottomMargin = 40
+    local statusY = math.min(textStartY + 36, h - bottomMargin)
+    
+    nvgFontFaceId(vg, fontId)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+    
     if quenchDone_ then
         local diff = math.abs(quenchTemp_ - quenchTarget_)
         local resultText
@@ -975,33 +1010,55 @@ local function RenderQuenchStatus(vg, cx, barBottom)
             resultText = "偏差较大"
             nvgFillColor(vg, nvgRGBA(120, 130, 140, 255))
         end
-        nvgFontSize(vg, 22)
-        nvgText(vg, cx, barBottom + 42, resultText, nil)
+        nvgFontSize(vg, math.min(22, math.floor(h * 0.032)))
+        nvgText(vg, cx, statusY, resultText, nil)
     else
         nvgFillColor(vg, nvgRGBA(255, 255, 255, 230))
-        nvgFontSize(vg, 18)
+        nvgFontSize(vg, math.min(18, math.floor(h * 0.028)))
         if quenchHolding_ then
-            nvgText(vg, cx, barBottom + 42, "淬火中... 松开即停止!", nil)
-        else
-            nvgText(vg, cx, barBottom + 42, "按住淬火，松开停止!", nil)
-            nvgFontSize(vg, 14)
+            nvgText(vg, cx, statusY, "淬火中... 松开即停止!", nil)
+            -- 第二行提示
+            nvgFontSize(vg, math.min(14, math.floor(h * 0.022)))
             nvgFillColor(vg, nvgRGBA(150, 200, 255, 200))
-            nvgText(vg, cx, barBottom + 64, "停在蓝线上!", nil)
+            nvgText(vg, cx, statusY + 28, "停在蓝线上!", nil)
+        else
+            nvgText(vg, cx, statusY, "按住淬火，松开停止!", nil)
+            nvgFontSize(vg, math.min(14, math.floor(h * 0.022)))
+            nvgFillColor(vg, nvgRGBA(150, 200, 255, 200))
+            nvgText(vg, cx, statusY + 28, "停在蓝线上!", nil)
         end
     end
 end
 
---- 淬火阶段主渲染入口
+
+--- 淬火阶段主渲染入口（完全自适应布局）
 RenderQuenchPhase = function(vg, w, h)
     local cx = w / 2
-    local cy = h / 2
     
     local fontId = NVG.GetFont()
     if fontId == -1 then return end
+    nvgFontFaceId(vg, fontId)
     
-    RenderQuenchCountdown(vg, cx, cy, fontId)
-    local barBottom = RenderThermometer(vg, cx, cy, fontId)
-    RenderQuenchStatus(vg, cx, barBottom)
+    -- ================================================================
+    -- 所有 Y 坐标基于屏幕高度 h 计算，适配任意宽高比（含 20:9）
+    -- ================================================================
+    
+    -- ① 倒计时：屏幕高度 11% 处（20:9 下也不会太靠上）
+    local countdownY = h * 0.11
+    RenderQuenchCountdown(vg, cx, countdownY, fontId)
+    
+    -- ② 温度计：高度自适应，最多为屏幕高度的 50%，从屏幕 20% 高度处开始
+    local maxBarH  = math.min(180, h * 0.50)
+    local barW     = 44
+    local barX     = cx - barW / 2
+    local barY     = h * 0.20  -- 温度计顶部位置
+    
+    -- 温度计底部之后的文字起始位置
+    local textStartY = RenderThermometer(vg, cx, barY, maxBarH, barW, fontId)
+    
+    -- ③ 状态提示：紧跟温度计，确保不超出屏幕底部
+    RenderQuenchStatus(vg, cx, textStartY, h, fontId)
 end
+
 
 return ForgeState
