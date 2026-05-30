@@ -15,9 +15,14 @@ local DrawState = {}
 local gameData_ = nil
 local onComplete_ = nil
 
--- 画布位置（居中计算）
+-- 画布位置（由 UI 布局动态决定）
 local canvasScreenX_ = 0
 local canvasScreenY_ = 0
+local canvasSize_ = 200
+
+-- 中间占位面板引用（用于获取实际布局）
+local canvasAreaPanel_ = nil
+local canvasBoundsReady_ = false
 
 -- 输入追踪
 local pointerDown_ = false
@@ -30,15 +35,9 @@ function DrawState.Enter(gameData, onComplete)
     pointerDown_ = false
     
     Canvas.Init(NVG.Get())
+    canvasBoundsReady_ = false
     
-    -- 计算画布居中位置
-    local screenW = graphics:GetWidth() / graphics:GetDPR()
-    local screenH = graphics:GetHeight() / graphics:GetDPR()
-    canvasScreenX_ = (screenW - Config.Canvas.Width) / 2
-    canvasScreenY_ = (screenH - Config.Canvas.Height) / 2 - 20
-    Canvas.SetBounds(canvasScreenX_, canvasScreenY_, Config.Canvas.Width, Config.Canvas.Height)
-    
-    print("[DrawState] Entered. Canvas at: " .. canvasScreenX_ .. ", " .. canvasScreenY_)
+    print("[DrawState] Entered. Waiting for UI layout to determine canvas bounds.")
 end
 
 --- 离开状态时清理
@@ -48,6 +47,11 @@ end
 
 --- 构建绘制阶段的 UI
 function DrawState.BuildUI()
+    canvasAreaPanel_ = UI.Panel {
+        width = "100%",
+        flexGrow = 1,
+        pointerEvents = "none",
+    }
     return UI.Panel {
         width = "100%", height = "100%",
         children = {
@@ -90,11 +94,7 @@ function DrawState.BuildUI()
             },
             
             -- 画布区域（由 NanoVG 直接渲染，UI 只占位，必须透明）
-            UI.Panel {
-                width = "100%",
-                flexGrow = 1,
-                pointerEvents = "none",
-            },
+            canvasAreaPanel_,
             
             -- 底部：模板选择 + 完成按钮
             UI.Panel {
@@ -184,8 +184,22 @@ function DrawState.FinishDrawing()
     if onComplete_ then onComplete_() end
 end
 
---- 更新（画布不需要逻辑更新）
+--- 更新：从 UI 布局动态获取画布区域
 function DrawState.Update(dt)
+    if not canvasBoundsReady_ and canvasAreaPanel_ then
+        local layout = canvasAreaPanel_:GetAbsoluteLayout()
+        if layout and layout.w > 0 and layout.h > 0 then
+            -- 在面板区域内居中放置正方形画布
+            local size = math.min(layout.w * 0.92, layout.h * 0.92)
+            size = math.max(size, 150)
+            canvasSize_ = size
+            canvasScreenX_ = layout.x + (layout.w - size) / 2
+            canvasScreenY_ = layout.y + (layout.h - size) / 2
+            Canvas.SetBounds(canvasScreenX_, canvasScreenY_, size, size)
+            canvasBoundsReady_ = true
+            print("[DrawState] Canvas bounds from layout: " .. canvasScreenX_ .. "," .. canvasScreenY_ .. " size=" .. size)
+        end
+    end
 end
 
 --- 按键处理

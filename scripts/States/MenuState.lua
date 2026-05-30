@@ -12,6 +12,8 @@ local MenuState = {}
 
 -- 前置声明（内部子函数）
 local HitTestButtons
+local HitTestSecret
+local ToggleBackground
 local RenderBackground
 local RenderButtons
 local RenderCharacterPanel
@@ -25,15 +27,19 @@ local uiRoot_ = nil
 local screenW_ = 0
 local screenH_ = 0
 
--- 背景图
+-- 背景图（双背景切换）
 local bgImage_ = nil
+local bgImageAlt_ = nil        -- 备选背景（原版）
+local BG_PATH_NEW = "image/menu_bg_forge.png"   -- 新版铁匠铺背景（默认）
+local BG_PATH_OLD = "image/menu_bg.png"         -- 原版背景
+local useNewBg_ = true          -- 当前是否使用新背景
 
 -- 按钮定义（左上角比例坐标 + 宽高比例，基于图片实际布局）
 -- "开始游戏": 左下木桩铭牌 | "查看角色": 盾牌下方铭牌 | "离开": 右下桌前木牌
 local buttons_ = {
-    { id = "start",     label = "开始游戏", rx = 0.19, ry = 0.77, rw = 0.115, rh = 0.05 },
+    { id = "start",     label = "开始游戏", rx = 0.22, ry = 0.77, rw = 0.115, rh = 0.05 },
     { id = "character", label = "查看角色", rx = 0.46, ry = 0.60, rw = 0.11,  rh = 0.045 },
-    { id = "quit",      label = "离开",     rx = 0.695, ry = 0.765, rw = 0.105, rh = 0.05 },
+    { id = "quit",      label = "离开",     rx = 0.72, ry = 0.765, rw = 0.105, rh = 0.05 },
 }
 
 -- 按钮交互状态
@@ -41,6 +47,9 @@ local hoverIndex_ = 0       -- 当前悬停按钮 (0=无)
 local pressIndex_ = 0       -- 当前按下按钮
 local glowAlpha_ = {}       -- 每个按钮的发光强度 (0~255)
 local pressAnim_ = {}       -- 点击闪光动画 (0~1)
+
+-- 隐藏触发点（左侧壁炉区域切换背景）
+local SECRET_ZONE = { rx = 0.0, ry = 0.35, rw = 0.12, rh = 0.45 }
 
 -- 角色面板状态
 local showCharPanel_ = false
@@ -70,11 +79,17 @@ function MenuState.Enter(onStart)
     screenW_ = graphics:GetWidth() / graphics:GetDPR()
     screenH_ = graphics:GetHeight() / graphics:GetDPR()
 
-    -- 加载背景
+    -- 加载背景（两套）
     local vg = NVG.Get()
-    if vg and not bgImage_ then
-        bgImage_ = nvgCreateImage(vg, "image/menu_bg.png", 0)
+    if vg then
+        if not bgImage_ then
+            bgImage_ = nvgCreateImage(vg, BG_PATH_NEW, 0)
+        end
+        if not bgImageAlt_ then
+            bgImageAlt_ = nvgCreateImage(vg, BG_PATH_OLD, 0)
+        end
     end
+    useNewBg_ = true  -- 默认使用新背景
 
     -- 初始化按钮状态
     for i = 1, #buttons_ do
@@ -111,8 +126,11 @@ end
 function MenuState.Update(dt)
     -- 按钮悬停动画插值
     for i = 1, #buttons_ do
-        local targetGlow = (i == hoverIndex_) and 220 or 0
-        glowAlpha_[i] = glowAlpha_[i] + (targetGlow - glowAlpha_[i]) * dt * 8
+        if i == hoverIndex_ then
+            glowAlpha_[i] = glowAlpha_[i] + (220 - glowAlpha_[i]) * dt * 8
+        else
+            glowAlpha_[i] = 0
+        end
 
         -- 点击闪光衰减
         if pressAnim_[i] > 0 then
@@ -153,6 +171,13 @@ function MenuState.OnMouseDown(button)
 
     local mx = input.mousePosition.x / graphics:GetDPR()
     local my = input.mousePosition.y / graphics:GetDPR()
+
+    -- 隐藏触发点检测（优先于按钮）
+    if HitTestSecret(mx, my) then
+        ToggleBackground()
+        return
+    end
+
     local idx = HitTestButtons(mx, my)
 
     if idx > 0 then
@@ -202,6 +227,12 @@ function MenuState.OnTouchBegin(x, y)
         return
     end
 
+    -- 隐藏触发点检测（优先于按钮）
+    if HitTestSecret(tx, ty) then
+        ToggleBackground()
+        return
+    end
+
     local idx = HitTestButtons(tx, ty)
     if idx > 0 then
         pressAnim_[idx] = 1.0
@@ -216,6 +247,20 @@ end
 
 function MenuState.OnTouchMove(x, y) end
 function MenuState.OnTouchEnd(x, y) end
+
+--- 命中测试：隐藏触发区域（左侧壁炉）
+HitTestSecret = function(mx, my)
+    local sx = screenW_ * SECRET_ZONE.rx
+    local sy = screenH_ * SECRET_ZONE.ry
+    local sw = screenW_ * SECRET_ZONE.rw
+    local sh = screenH_ * SECRET_ZONE.rh
+    return mx >= sx and mx <= sx + sw and my >= sy and my <= sy + sh
+end
+
+--- 切换背景
+ToggleBackground = function()
+    useNewBg_ = not useNewBg_
+end
 
 --- 命中测试：返回鼠标下的按钮索引，0=无
 --- 按钮坐标为左上角 (rx,ry) + 宽高 (rw,rh)
@@ -265,7 +310,8 @@ end
 
 --- 渲染背景图（铺满屏幕）
 function RenderBackground(vg)
-    if not bgImage_ or bgImage_ == 0 then
+    local currentBg = useNewBg_ and bgImage_ or bgImageAlt_
+    if not currentBg or currentBg == 0 then
         -- 无图片时纯色备用 - 深蓝灰
         nvgBeginPath(vg)
         nvgRect(vg, 0, 0, screenW_, screenH_)
@@ -274,7 +320,7 @@ function RenderBackground(vg)
         return
     end
 
-    local imgPaint = nvgImagePattern(vg, 0, 0, screenW_, screenH_, 0, bgImage_, 1.0)
+    local imgPaint = nvgImagePattern(vg, 0, 0, screenW_, screenH_, 0, currentBg, 1.0)
     nvgBeginPath(vg)
     nvgRect(vg, 0, 0, screenW_, screenH_)
     nvgFillPaint(vg, imgPaint)
@@ -299,7 +345,8 @@ function RenderButtons(vg)
         local cy = by + bh / 2
 
         -- 放大镜效果：悬停时裁剪该区域并放大显示背景图
-        if glow > 5 and bgImage_ and bgImage_ ~= 0 then
+        local currentBg = useNewBg_ and bgImage_ or bgImageAlt_
+        if glow > 5 and currentBg and currentBg ~= 0 then
             nvgSave(vg)
 
             -- 用 nvgScissor 裁剪到按钮区域（带少量外扩）
@@ -313,7 +360,7 @@ function RenderButtons(vg)
             local imgX = cx - (cx / screenW_) * imgW
             local imgY = cy - (cy / screenH_) * imgH
 
-            local zoomPaint = nvgImagePattern(vg, imgX, imgY, imgW, imgH, 0, bgImage_, 1.0)
+            local zoomPaint = nvgImagePattern(vg, imgX, imgY, imgW, imgH, 0, currentBg, 1.0)
             nvgBeginPath(vg)
             nvgRoundedRect(vg, bx - expand, by - expand, bw + expand * 2, bh + expand * 2, 5)
             nvgFillPaint(vg, zoomPaint)
@@ -322,38 +369,7 @@ function RenderButtons(vg)
             nvgRestore(vg)
         end
 
-        -- 高亮发光边框（无填充蒙层）
-        if glow > 10 then
-            local strokeAlpha = math.floor(math.min(glow, 255) * 0.9)
 
-            -- 外层柔光（2层扩散）- 宝蓝色交互主色
-            for layer = 2, 1, -1 do
-                local ex = layer * 3
-                local a = math.floor(strokeAlpha * 0.25 / layer)
-                nvgBeginPath(vg)
-                nvgRoundedRect(vg, bx - ex, by - ex, bw + ex * 2, bh + ex * 2, 4 + ex)
-                nvgStrokeColor(vg, nvgRGBA(150, 200, 255, a))
-                nvgStrokeWidth(vg, 1.5)
-                nvgStroke(vg)
-            end
-
-            -- 主边框 - 宝蓝色
-            nvgBeginPath(vg)
-            nvgRoundedRect(vg, bx, by, bw, bh, 4)
-            nvgStrokeColor(vg, nvgRGBA(150, 200, 255, strokeAlpha))
-            nvgStrokeWidth(vg, 1.5)
-            nvgStroke(vg)
-        end
-
-        -- 点击闪光边框（短暂白色描边闪烁）
-        if press > 0 then
-            local flashAlpha = math.floor(press * 220)
-            nvgBeginPath(vg)
-            nvgRoundedRect(vg, bx - 1, by - 1, bw + 2, bh + 2, 5)
-            nvgStrokeColor(vg, nvgRGBA(255, 255, 255, flashAlpha))
-            nvgStrokeWidth(vg, 2.5)
-            nvgStroke(vg)
-        end
     end
 end
 

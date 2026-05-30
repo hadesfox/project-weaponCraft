@@ -488,11 +488,22 @@ SpawnTargets = function()
             rx = 0.05 + math.random() * 0.9
             ry = 0
         end
-        targetDefs_[i] = { rx = rx, ry = ry, baseSize = baseSize }
+        -- platformRy: 该敌人所站平台的 ry（用于渲染贴地），地面敌人为 0
+        local platformRy = 0
+        if ry ~= 0 and i <= #platformDefs_ then
+            platformRy = platformDefs_[i].ry
+        end
+        targetDefs_[i] = { rx = rx, ry = ry, baseSize = baseSize, isGround = (ry == 0), platformRy = platformRy }
+        local ty = groundY_ - arenaH * ry
+        -- 地面敌人：碰撞中心对齐贴图视觉中心（贴图可见区域中心在地面线上方 size*0.8）
+        if ry == 0 then
+            ty = groundY_ - size * 0.8
+        end
         targets_[i] = {
             x = screenW_ * rx,
-            y = groundY_ - arenaH * ry,
+            y = ty,
             size = size,
+            hitRadius = (ry == 0) and (size * 0.8) or (size / 2),  -- 地面敌人碰撞半径匹配贴图宽度
             alive = true,
             hitAnim = 0,
             spawnAnim = 1.0,
@@ -508,9 +519,16 @@ RecalcTargets = function()
     for i = 1, #targetDefs_ do
         if targets_[i] then
             local def = targetDefs_[i]
+            local size = def.baseSize * physScale_
+            local ty = groundY_ - arenaH * def.ry
+            -- 地面敌人：碰撞中心对齐贴图视觉中心
+            if def.isGround then
+                ty = groundY_ - size * 0.8
+            end
             targets_[i].x = screenW_ * def.rx
-            targets_[i].y = groundY_ - arenaH * def.ry
-            targets_[i].size = def.baseSize * physScale_
+            targets_[i].y = ty
+            targets_[i].size = size
+            targets_[i].hitRadius = def.isGround and (size * 0.8) or (size / 2)
         end
     end
 end
@@ -833,7 +851,8 @@ CheckAttackCollision = function(progress)
             local t = targets_[i]
             if t.alive and not attackHitTargets_[i] then
                 local dist = PointToSegmentDist(t.x, t.y, originX, originY, tipX, tipY)
-                if dist < t.size / 2 + 12 then
+                local hr = t.hitRadius or (t.size / 2)
+                if dist < hr + 12 then
                     HitTarget(i, t, atk, dir)
                 end
             end
@@ -846,7 +865,8 @@ CheckAttackCollision = function(progress)
                 local dx = t.x - originX
                 local dy = t.y - originY
                 local dist = math.sqrt(dx * dx + dy * dy)
-                if dist < range + t.size / 2 then
+                local hr = t.hitRadius or (t.size / 2)
+                if dist < range + hr then
                     -- 判断目标是否在角色面朝方向的前方
                     local inFront = (player_.facingRight and dx > -20) or (not player_.facingRight and dx < 20)
                     local vertOk = math.abs(dy) < range * 0.8
@@ -1231,8 +1251,16 @@ RenderTargets = function(vg)
             local imgH = sz * 2.0
             
             if enemyImage_ and enemyImage_ ~= 0 then
-                -- 用红色史莱姆图片渲染（下移 20% 补偿图片内透明边距）
-                local imgY = groundY_ - imgH * 0.80
+                -- 贴图底部对齐敌人站立面（平台表面）
+                local def = targetDefs_[i]
+                local standY  -- 敌人脚底位置（平台/地面表面）
+                if def and def.isGround then
+                    standY = groundY_
+                else
+                    -- 平台敌人：直接使用平台表面 Y 坐标
+                    standY = groundY_ - groundY_ * (def and def.platformRy or 0)
+                end
+                local imgY = standY - imgH * 0.80
                 local imgPaint = nvgImagePattern(vg, tx - imgW / 2, imgY, imgW, imgH, 0, enemyImage_, 1.0)
                 nvgBeginPath(vg)
                 nvgRect(vg, tx - imgW / 2, imgY, imgW, imgH)
