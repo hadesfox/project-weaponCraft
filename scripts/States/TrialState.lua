@@ -140,14 +140,12 @@ function TrialState.Enter(gameData, onComplete)
     
     -- 加载主角贴图（待机帧）
     playerImage_ = nvgCreateImage(NVG.Get(), Config.Trial.PlayerImage, 0)
-    -- 加载跑步动画帧（6帧完整循环：右腿迈出→过渡→左腿迈出→过渡）
+    -- 加载跑步动画帧（4帧完整循环：右腿前→过渡→左腿前→过渡）
     local runFramePaths = {
-        "image/blacksmith_run1_20260530064604.png",   -- 右腿前迈
-        "image/blacksmith_run2_20260530064600.png",   -- 过渡（双脚交叉）
-        "image/blacksmith_run_L1_20260530070136.png", -- 左腿前迈
-        "image/blacksmith_run_L2_20260530070135.png", -- 过渡（左腿撑地）
-        "image/blacksmith_run3_20260530064609.png",   -- 右腿推蹬
-        "image/blacksmith_run4_20260530064717.png",   -- 过渡（准备换步）
+        "image/run_frame_A_20260530070458.png",  -- 右腿前迈，左腿后蹬
+        "image/run_frame_B_20260530070453.png",  -- 过渡（双腿收拢，身体上弹）
+        "image/run_frame_C_20260530070452.png",  -- 左腿前迈，右腿后蹬
+        "image/run_frame_D_20260530070559.png",  -- 过渡（双腿收拢，身体下沉）
     }
     playerRunFrames_ = {}
     for i = 1, #runFramePaths do
