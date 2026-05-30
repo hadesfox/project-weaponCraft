@@ -1,0 +1,468 @@
+-- ============================================================================
+-- States/MenuState.lua - 主菜单（NanoVG 背景 + 交互按钮特效）
+-- 背景图上三个按钮区域：开始游戏、查看角色、离开
+-- 悬停放大发光，点击反馈
+-- ============================================================================
+
+local UI = require("urhox-libs/UI")
+local Config = require("Config")
+local NVG = require("NVG")
+
+local MenuState = {}
+
+-- 前置声明（内部子函数）
+local HitTestButtons
+local RenderBackground
+local RenderButtons
+local RenderCharacterPanel
+local SplitLines
+
+-- 回调
+local onStartGame_ = nil
+local uiRoot_ = nil
+
+-- 屏幕尺寸
+local screenW_ = 0
+local screenH_ = 0
+
+-- 背景图
+local bgImage_ = nil
+
+-- 按钮定义（左上角比例坐标 + 宽高比例，基于图片实际布局）
+-- "开始游戏": 左下木桩铭牌 | "查看角色": 盾牌下方铭牌 | "离开": 右下桌前木牌
+local buttons_ = {
+    { id = "start",     label = "开始游戏", rx = 0.175, ry = 0.755, rw = 0.115, rh = 0.05 },
+    { id = "character", label = "查看角色", rx = 0.445, ry = 0.625, rw = 0.11,  rh = 0.045 },
+    { id = "quit",      label = "离开",     rx = 0.695, ry = 0.765, rw = 0.105, rh = 0.05 },
+}
+
+-- 按钮交互状态
+local hoverIndex_ = 0       -- 当前悬停按钮 (0=无)
+local pressIndex_ = 0       -- 当前按下按钮
+local glowAlpha_ = {}       -- 每个按钮的发光强度 (0~255)
+local pressAnim_ = {}       -- 点击闪光动画 (0~1)
+
+-- 角色面板状态
+local showCharPanel_ = false
+local charPanelAnim_ = 0    -- 面板展开动画 (0→1)
+
+-- 角色数据
+local characters_ = {
+    {
+        name = "铁匠",
+        icon = "⚒️",
+        desc = "沉默寡言的武器大师，能将任何涂鸦锻造成神兵利器。\n据说曾为远古英雄打造过传说级武器。",
+        stats = { "锻造术: ★★★★★", "力量: ★★★★☆", "耐力: ★★★★★" },
+        color = { 255, 180, 80 },
+    },
+    {
+        name = "史莱姆",
+        icon = "🟢",
+        desc = "试炼场中的训练伙伴，身体柔软但意外顽强。\n不同颜色代表不同属性，击败它们能获得锻造灵感。",
+        stats = { "弹性: ★★★★★", "再生: ★★★★☆", "速度: ★★☆☆☆" },
+        color = { 100, 220, 140 },
+    },
+}
+
+--- 进入菜单状态
+function MenuState.Enter(onStart)
+    onStartGame_ = onStart
+    screenW_ = graphics:GetWidth() / graphics:GetDPR()
+    screenH_ = graphics:GetHeight() / graphics:GetDPR()
+
+    -- 加载背景
+    local vg = NVG.Get()
+    if vg and not bgImage_ then
+        bgImage_ = nvgCreateImage(vg, "image/menu_bg.png", 0)
+    end
+
+    -- 初始化按钮状态
+    for i = 1, #buttons_ do
+        glowAlpha_[i] = 0
+        pressAnim_[i] = 0
+    end
+
+    hoverIndex_ = 0
+    pressIndex_ = 0
+    showCharPanel_ = false
+    charPanelAnim_ = 0
+end
+
+--- 离开菜单状态
+function MenuState.Leave()
+    showCharPanel_ = false
+    charPanelAnim_ = 0
+end
+
+--- 构建 UI（仅角色面板悬浮层用 UI 组件）
+function MenuState.BuildUI()
+    -- 菜单主体通过 NanoVG 渲染，UI 层为空壳（穿透点击）
+    uiRoot_ = UI.Panel {
+        width = "100%", height = "100%",
+        pointerEvents = "none",
+    }
+    return uiRoot_
+end
+
+-- ============================================================================
+-- 更新
+-- ============================================================================
+
+function MenuState.Update(dt)
+    -- 按钮悬停动画插值
+    for i = 1, #buttons_ do
+        local targetGlow = (i == hoverIndex_) and 220 or 0
+        glowAlpha_[i] = glowAlpha_[i] + (targetGlow - glowAlpha_[i]) * dt * 8
+
+        -- 点击闪光衰减
+        if pressAnim_[i] > 0 then
+            pressAnim_[i] = math.max(0, pressAnim_[i] - dt * 4)
+        end
+    end
+
+    -- 角色面板动画
+    local targetPanel = showCharPanel_ and 1.0 or 0.0
+    charPanelAnim_ = charPanelAnim_ + (targetPanel - charPanelAnim_) * dt * 8
+end
+
+-- ============================================================================
+-- 输入处理
+-- ============================================================================
+
+function MenuState.OnKeyDown(key)
+    if key == KEY_ESCAPE then
+        if showCharPanel_ then
+            showCharPanel_ = false
+        end
+    elseif key == KEY_RETURN or key == KEY_SPACE then
+        if not showCharPanel_ then
+            if onStartGame_ then onStartGame_() end
+        end
+    end
+end
+
+function MenuState.OnKeyUp(key) end
+
+function MenuState.OnMouseDown(button)
+    if button ~= MOUSEB_LEFT then return end
+    if showCharPanel_ then
+        -- 点击关闭面板
+        showCharPanel_ = false
+        return
+    end
+
+    local mx = input.mousePosition.x / graphics:GetDPR()
+    local my = input.mousePosition.y / graphics:GetDPR()
+    local idx = HitTestButtons(mx, my)
+
+    if idx > 0 then
+        pressIndex_ = idx
+        pressAnim_[idx] = 1.0
+    end
+end
+
+function MenuState.OnMouseUp(button)
+    if button ~= MOUSEB_LEFT then return end
+    if pressIndex_ > 0 then
+        local mx = input.mousePosition.x / graphics:GetDPR()
+        local my = input.mousePosition.y / graphics:GetDPR()
+        local idx = HitTestButtons(mx, my)
+
+        if idx == pressIndex_ then
+            -- 执行按钮动作
+            local btnId = buttons_[idx].id
+            if btnId == "start" then
+                if onStartGame_ then onStartGame_() end
+            elseif btnId == "character" then
+                showCharPanel_ = true
+            elseif btnId == "quit" then
+                -- 无实际退出功能，闪光即可
+            end
+        end
+        pressIndex_ = 0
+    end
+end
+
+function MenuState.OnMouseMove()
+    if showCharPanel_ then
+        hoverIndex_ = 0
+        return
+    end
+    local mx = input.mousePosition.x / graphics:GetDPR()
+    local my = input.mousePosition.y / graphics:GetDPR()
+    hoverIndex_ = HitTestButtons(mx, my)
+end
+
+function MenuState.OnTouchBegin(x, y)
+    local dpr = graphics:GetDPR()
+    local tx, ty = x / dpr, y / dpr
+
+    if showCharPanel_ then
+        showCharPanel_ = false
+        return
+    end
+
+    local idx = HitTestButtons(tx, ty)
+    if idx > 0 then
+        pressAnim_[idx] = 1.0
+        local btnId = buttons_[idx].id
+        if btnId == "start" then
+            if onStartGame_ then onStartGame_() end
+        elseif btnId == "character" then
+            showCharPanel_ = true
+        end
+    end
+end
+
+function MenuState.OnTouchMove(x, y) end
+function MenuState.OnTouchEnd(x, y) end
+
+--- 命中测试：返回鼠标下的按钮索引，0=无
+--- 按钮坐标为左上角 (rx,ry) + 宽高 (rw,rh)
+function HitTestButtons(mx, my)
+    for i = 1, #buttons_ do
+        local b = buttons_[i]
+        local bx = screenW_ * b.rx
+        local by = screenH_ * b.ry
+        local bw = screenW_ * b.rw
+        local bh = screenH_ * b.rh
+        if mx >= bx and mx <= bx + bw and
+           my >= by and my <= by + bh then
+            return i
+        end
+    end
+    return 0
+end
+
+-- ============================================================================
+-- NanoVG 渲染
+-- ============================================================================
+
+function MenuState.Render(vg)
+    local w = graphics:GetWidth()
+    local h = graphics:GetHeight()
+    local dpr = graphics:GetDPR()
+    screenW_ = w / dpr
+    screenH_ = h / dpr
+
+    nvgBeginFrame(vg, w, h, 1.0)
+    nvgScale(vg, dpr, dpr)
+
+    -- 背景图
+    RenderBackground(vg)
+
+    -- 按钮特效
+    RenderButtons(vg)
+
+    -- 角色面板
+    if charPanelAnim_ > 0.01 then
+        RenderCharacterPanel(vg)
+    end
+
+    nvgResetTransform(vg)
+    nvgEndFrame(vg)
+end
+
+--- 渲染背景图（铺满屏幕）
+function RenderBackground(vg)
+    if not bgImage_ or bgImage_ == 0 then
+        -- 无图片时的纯色备用
+        nvgBeginPath(vg)
+        nvgRect(vg, 0, 0, screenW_, screenH_)
+        nvgFillColor(vg, nvgRGBA(20, 22, 30, 255))
+        nvgFill(vg)
+        return
+    end
+
+    local imgPaint = nvgImagePattern(vg, 0, 0, screenW_, screenH_, 0, bgImage_, 1.0)
+    nvgBeginPath(vg)
+    nvgRect(vg, 0, 0, screenW_, screenH_)
+    nvgFillPaint(vg, imgPaint)
+    nvgFill(vg)
+end
+
+--- 渲染按钮特效（透明触发框 + 高亮边框 + 放大镜效果）
+function RenderButtons(vg)
+    local ZOOM = 1.3  -- 放大镜倍率
+
+    for i = 1, #buttons_ do
+        local b = buttons_[i]
+        local bx = screenW_ * b.rx
+        local by = screenH_ * b.ry
+        local bw = screenW_ * b.rw
+        local bh = screenH_ * b.rh
+        local glow = glowAlpha_[i] or 0
+        local press = pressAnim_[i] or 0
+
+        -- 按钮中心
+        local cx = bx + bw / 2
+        local cy = by + bh / 2
+
+        -- 放大镜效果：悬停时裁剪该区域并放大显示背景图
+        if glow > 5 and bgImage_ and bgImage_ ~= 0 then
+            nvgSave(vg)
+
+            -- 用 nvgScissor 裁剪到按钮区域（带少量外扩）
+            local expand = 3
+            nvgScissor(vg, bx - expand, by - expand, bw + expand * 2, bh + expand * 2)
+
+            -- 在裁剪区域内绘制放大后的背景
+            -- 计算放大后的图片偏移，使按钮中心位置对齐
+            local imgW = screenW_ * ZOOM
+            local imgH = screenH_ * ZOOM
+            local imgX = cx - (cx / screenW_) * imgW
+            local imgY = cy - (cy / screenH_) * imgH
+
+            local zoomPaint = nvgImagePattern(vg, imgX, imgY, imgW, imgH, 0, bgImage_, 1.0)
+            nvgBeginPath(vg)
+            nvgRoundedRect(vg, bx - expand, by - expand, bw + expand * 2, bh + expand * 2, 5)
+            nvgFillPaint(vg, zoomPaint)
+            nvgFill(vg)
+
+            nvgRestore(vg)
+        end
+
+        -- 高亮发光边框（无填充蒙层）
+        if glow > 10 then
+            local strokeAlpha = math.floor(math.min(glow, 255) * 0.9)
+
+            -- 外层柔光（2层扩散）
+            for layer = 2, 1, -1 do
+                local ex = layer * 3
+                local a = math.floor(strokeAlpha * 0.25 / layer)
+                nvgBeginPath(vg)
+                nvgRoundedRect(vg, bx - ex, by - ex, bw + ex * 2, bh + ex * 2, 4 + ex)
+                nvgStrokeColor(vg, nvgRGBA(180, 220, 255, a))
+                nvgStrokeWidth(vg, 1.5)
+                nvgStroke(vg)
+            end
+
+            -- 主边框
+            nvgBeginPath(vg)
+            nvgRoundedRect(vg, bx, by, bw, bh, 4)
+            nvgStrokeColor(vg, nvgRGBA(220, 240, 255, strokeAlpha))
+            nvgStrokeWidth(vg, 1.5)
+            nvgStroke(vg)
+        end
+
+        -- 点击闪光边框（短暂白色描边闪烁）
+        if press > 0 then
+            local flashAlpha = math.floor(press * 220)
+            nvgBeginPath(vg)
+            nvgRoundedRect(vg, bx - 1, by - 1, bw + 2, bh + 2, 5)
+            nvgStrokeColor(vg, nvgRGBA(255, 255, 255, flashAlpha))
+            nvgStrokeWidth(vg, 2.5)
+            nvgStroke(vg)
+        end
+    end
+end
+
+--- 渲染角色信息面板
+function RenderCharacterPanel(vg)
+    local alpha = math.floor(charPanelAnim_ * 255)
+    local panelScale = 0.85 + charPanelAnim_ * 0.15
+
+    -- 半透明遮罩
+    nvgBeginPath(vg)
+    nvgRect(vg, 0, 0, screenW_, screenH_)
+    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(charPanelAnim_ * 180)))
+    nvgFill(vg)
+
+    -- 面板
+    local panelW = math.min(screenW_ * 0.85, 520)
+    local panelH = math.min(screenH_ * 0.7, 360)
+    local px = (screenW_ - panelW) / 2
+    local py = (screenH_ - panelH) / 2
+
+    nvgSave(vg)
+    nvgTranslate(vg, screenW_ / 2, screenH_ / 2)
+    nvgScale(vg, panelScale, panelScale)
+    nvgTranslate(vg, -screenW_ / 2, -screenH_ / 2)
+
+    -- 面板背景
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, px, py, panelW, panelH, 16)
+    nvgFillColor(vg, nvgRGBA(30, 32, 45, alpha))
+    nvgFill(vg)
+    nvgStrokeColor(vg, nvgRGBA(100, 140, 200, math.floor(alpha * 0.6)))
+    nvgStrokeWidth(vg, 1.5)
+    nvgStroke(vg)
+
+    -- 标题
+    local fontId = NVG.GetFont()
+    if fontId ~= -1 then
+        nvgFontFaceId(vg, fontId)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+        nvgFontSize(vg, 22)
+        nvgFillColor(vg, nvgRGBA(255, 220, 100, alpha))
+        nvgText(vg, screenW_ / 2, py + 18, "角色图鉴", nil)
+
+        -- 角色卡片
+        local cardW = (panelW - 60) / 2
+        local cardH = panelH - 80
+        local cardY = py + 55
+
+        for i = 1, #characters_ do
+            local ch = characters_[i]
+            local cardX = px + 20 + (i - 1) * (cardW + 20)
+
+            -- 卡片背景
+            nvgBeginPath(vg)
+            nvgRoundedRect(vg, cardX, cardY, cardW, cardH, 10)
+            nvgFillColor(vg, nvgRGBA(40, 44, 60, alpha))
+            nvgFill(vg)
+            nvgStrokeColor(vg, nvgRGBA(ch.color[1], ch.color[2], ch.color[3], math.floor(alpha * 0.5)))
+            nvgStrokeWidth(vg, 1)
+            nvgStroke(vg)
+
+            -- 角色图标
+            nvgFontSize(vg, 36)
+            nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+            nvgFillColor(vg, nvgRGBA(255, 255, 255, alpha))
+            nvgText(vg, cardX + cardW / 2, cardY + 12, ch.icon, nil)
+
+            -- 名称
+            nvgFontSize(vg, 16)
+            nvgFillColor(vg, nvgRGBA(ch.color[1], ch.color[2], ch.color[3], alpha))
+            nvgText(vg, cardX + cardW / 2, cardY + 55, ch.name, nil)
+
+            -- 描述（多行文本）
+            nvgFontSize(vg, 11)
+            nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
+            nvgFillColor(vg, nvgRGBA(190, 195, 210, alpha))
+            local descLines = SplitLines(ch.desc)
+            local lineY = cardY + 80
+            for j = 1, #descLines do
+                nvgText(vg, cardX + 12, lineY, descLines[j], nil)
+                lineY = lineY + 15
+            end
+
+            -- 属性
+            nvgFontSize(vg, 11)
+            nvgFillColor(vg, nvgRGBA(160, 200, 240, alpha))
+            local statY = cardY + cardH - 15 * #ch.stats - 10
+            for j = 1, #ch.stats do
+                nvgText(vg, cardX + 12, statY, ch.stats[j], nil)
+                statY = statY + 15
+            end
+        end
+
+        -- 底部提示
+        nvgFontSize(vg, 11)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
+        nvgFillColor(vg, nvgRGBA(140, 140, 160, math.floor(alpha * 0.7)))
+        nvgText(vg, screenW_ / 2, py + panelH - 10, "点击任意位置关闭", nil)
+    end
+
+    nvgRestore(vg)
+end
+--- 工具：按换行符拆分字符串
+function SplitLines(str)
+    local lines = {}
+    for line in str:gmatch("([^\n]+)") do
+        lines[#lines + 1] = line
+    end
+    return lines
+end
+
+return MenuState

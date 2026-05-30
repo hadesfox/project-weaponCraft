@@ -10,6 +10,7 @@ local DrawState = require("States.DrawState")
 local ForgeState = require("States.ForgeState")
 local ResultState = require("States.ResultState")
 local TrialState = require("States.TrialState")
+local MenuState = require("States.MenuState")
 
 -- ============================================================================
 -- 全局状态
@@ -89,7 +90,11 @@ function SwitchState(newState)
     
     -- 进入新状态
     if newState == Config.States.MENU then
-        BuildMenuUI()
+        MenuState.Enter(function()
+            SwitchState(Config.States.DRAW)
+        end)
+        uiRoot_ = MenuState.BuildUI()
+        UI.SetRoot(uiRoot_)
     elseif newState == Config.States.DRAW then
         DrawState.Enter(gameData_, function()
             SwitchState(Config.States.FORGE)
@@ -116,7 +121,9 @@ end
 
 --- 离开状态时的清理
 function LeaveState(state)
-    if state == Config.States.DRAW then
+    if state == Config.States.MENU then
+        MenuState.Leave()
+    elseif state == Config.States.DRAW then
         DrawState.Leave()
     elseif state == Config.States.FORGE then
         ForgeState.Leave()
@@ -125,56 +132,6 @@ function LeaveState(state)
     elseif state == Config.States.TRIAL then
         TrialState.Leave()
     end
-end
-
--- ============================================================================
--- 主菜单 UI
--- ============================================================================
-
-function BuildMenuUI()
-    uiRoot_ = UI.Panel {
-        width = "100%", height = "100%",
-        justifyContent = "center", alignItems = "center",
-        backgroundColor = Config.Colors.BgDark,
-        children = {
-            UI.Panel {
-                width = "90%", maxWidth = 400,
-                padding = 40, gap = 20,
-                backgroundColor = Config.Colors.BgMedium,
-                borderRadius = 20,
-                alignItems = "center",
-                children = {
-                    UI.Label {
-                        text = "⚒️ 锻造师",
-                        fontSize = 32,
-                        fontColor = Config.Colors.Gold,
-                    },
-                    UI.Label {
-                        text = "绘制你的武器，锻造独一无二的神兵",
-                        fontSize = 14,
-                        fontColor = { 180, 180, 200, 255 },
-                        textAlign = "center",
-                    },
-                    UI.Panel { height = 20 },
-                    UI.Button {
-                        text = "开始锻造",
-                        variant = "primary",
-                        width = 200,
-                        onClick = function()
-                            SwitchState(Config.States.DRAW)
-                        end,
-                    },
-                    UI.Label {
-                        text = "提示：尝试画出多个相连的形状...",
-                        fontSize = 11,
-                        fontColor = { 120, 120, 140, 180 },
-                        textAlign = "center",
-                    },
-                },
-            },
-        },
-    }
-    UI.SetRoot(uiRoot_)
 end
 
 -- ============================================================================
@@ -207,6 +164,7 @@ end
 
 --- 状态 → 模块的映射表（统一分发，无需逐事件硬编码）
 local STATE_MODULES = {
+    [Config.States.MENU]   = MenuState,
     [Config.States.DRAW]   = DrawState,
     [Config.States.FORGE]  = ForgeState,
     [Config.States.RESULT] = ResultState,
