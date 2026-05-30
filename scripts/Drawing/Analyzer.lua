@@ -161,6 +161,7 @@ DetectComposite = function(strokes, result)
 end
 
 --- 判断两个笔画是否有连接关系
+--- 检测方式：端点对端点 + 端点对路径体（每隔几个采样点）
 AreStrokesConnected = function(strokeA, strokeB)
     local threshold = Config.Analyzer.ConnectionDistanceSq
     local ptsA = strokeA.points
@@ -168,17 +169,38 @@ AreStrokesConnected = function(strokeA, strokeB)
     
     if #ptsA == 0 or #ptsB == 0 then return false end
     
-    -- 检查 A 的端点和 B 的端点/边缘距离
-    local checkPoints = {
-        ptsA[1], ptsA[#ptsA],
-        ptsB[1], ptsB[#ptsB],
-    }
+    -- 1) A的首尾 vs B的首尾（原逻辑）
+    local endpointsA = { ptsA[1], ptsA[#ptsA] }
+    local endpointsB = { ptsB[1], ptsB[#ptsB] }
     
-    -- A的首尾 vs B的首尾
     for ai = 1, 2 do
-        for bi = 3, 4 do
-            local dx = checkPoints[ai].x - checkPoints[bi].x
-            local dy = checkPoints[ai].y - checkPoints[bi].y
+        for bi = 1, 2 do
+            local dx = endpointsA[ai].x - endpointsB[bi].x
+            local dy = endpointsA[ai].y - endpointsB[bi].y
+            if dx*dx + dy*dy < threshold then
+                return true
+            end
+        end
+    end
+    
+    -- 2) A的端点 vs B的路径体（每隔step个点采样）
+    local step = math.max(1, math.floor(#ptsB / 20))
+    for ai = 1, 2 do
+        for bi = 1, #ptsB, step do
+            local dx = endpointsA[ai].x - ptsB[bi].x
+            local dy = endpointsA[ai].y - ptsB[bi].y
+            if dx*dx + dy*dy < threshold then
+                return true
+            end
+        end
+    end
+    
+    -- 3) B的端点 vs A的路径体
+    step = math.max(1, math.floor(#ptsA / 20))
+    for bi = 1, 2 do
+        for ai = 1, #ptsA, step do
+            local dx = endpointsB[bi].x - ptsA[ai].x
+            local dy = endpointsB[bi].y - ptsA[ai].y
             if dx*dx + dy*dy < threshold then
                 return true
             end

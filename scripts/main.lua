@@ -73,6 +73,44 @@ function InitUI()
             } }
         },
         scale = UI.Scale.DEFAULT,
+        theme = {
+            colors = {
+                -- 暗黑锻造风格按钮色
+                primary = { 140, 100, 50, 255 },         -- 锻铁暗金
+                primaryHover = { 170, 125, 60, 255 },    -- 悬停暖金
+                primaryPressed = { 110, 80, 40, 255 },   -- 按下深铜
+
+                secondary = { 70, 70, 75, 255 },         -- 铁灰
+                secondaryHover = { 90, 90, 95, 255 },
+                secondaryPressed = { 55, 55, 60, 255 },
+
+                background = { 20, 22, 28, 255 },        -- 压抑黑蓝
+                surface = { 40, 40, 45, 230 },           -- 深锻台面
+                surfaceHover = { 55, 55, 60, 230 },
+
+                text = { 200, 205, 210, 255 },           -- 哑光银
+                textSecondary = { 120, 130, 140, 255 },  -- 钢灰
+                textDisabled = { 60, 60, 65, 255 },
+
+                border = { 70, 60, 45, 255 },            -- 暗褐边框
+                borderFocus = { 150, 200, 255, 255 },    -- 冰霜蓝聚焦
+
+                success = { 80, 160, 80, 255 },
+                successHover = { 100, 180, 100, 255 },
+                warning = { 160, 140, 90, 255 },         -- 旧金
+                warningHover = { 180, 160, 110, 255 },
+                error = { 200, 80, 40, 255 },            -- 炭火红
+                errorHover = { 220, 100, 60, 255 },
+                info = { 150, 200, 255, 255 },           -- 冰霜蓝
+
+                disabled = { 45, 45, 50, 255 },
+                disabledText = { 80, 80, 85, 255 },
+
+                overlay = { 0, 0, 0, 180 },
+                transparent = { 0, 0, 0, 0 },
+                hover = { 255, 255, 255, 15 },
+            },
+        },
     })
 end
 

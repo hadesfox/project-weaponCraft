@@ -31,8 +31,8 @@ local bgImage_ = nil
 -- 按钮定义（左上角比例坐标 + 宽高比例，基于图片实际布局）
 -- "开始游戏": 左下木桩铭牌 | "查看角色": 盾牌下方铭牌 | "离开": 右下桌前木牌
 local buttons_ = {
-    { id = "start",     label = "开始游戏", rx = 0.175, ry = 0.755, rw = 0.115, rh = 0.05 },
-    { id = "character", label = "查看角色", rx = 0.445, ry = 0.625, rw = 0.11,  rh = 0.045 },
+    { id = "start",     label = "开始游戏", rx = 0.19, ry = 0.77, rw = 0.115, rh = 0.05 },
+    { id = "character", label = "查看角色", rx = 0.46, ry = 0.60, rw = 0.11,  rh = 0.045 },
     { id = "quit",      label = "离开",     rx = 0.695, ry = 0.765, rw = 0.105, rh = 0.05 },
 }
 
@@ -50,19 +50,19 @@ local charPanelAnim_ = 0    -- 面板展开动画 (0→1)
 local characters_ = {
     {
         name = "铁匠",
-        icon = "⚒️",
+        image = "image/主角_锻造师_20260530003547.png",
         desc = "沉默寡言的武器大师，能将任何涂鸦锻造成神兵利器。\n据说曾为远古英雄打造过传说级武器。",
-        stats = { "锻造术: ★★★★★", "力量: ★★★★☆", "耐力: ★★★★★" },
         color = { 255, 180, 80 },
     },
     {
         name = "史莱姆",
-        icon = "🟢",
+        image = "image/史莱姆_20260530090540.png",
         desc = "试炼场中的训练伙伴，身体柔软但意外顽强。\n不同颜色代表不同属性，击败它们能获得锻造灵感。",
-        stats = { "弹性: ★★★★★", "再生: ★★★★☆", "速度: ★★☆☆☆" },
         color = { 100, 220, 140 },
     },
 }
+-- 角色图片 NanoVG handle（延迟加载）
+local charImages_ = {}
 
 --- 进入菜单状态
 function MenuState.Enter(onStart)
@@ -266,10 +266,10 @@ end
 --- 渲染背景图（铺满屏幕）
 function RenderBackground(vg)
     if not bgImage_ or bgImage_ == 0 then
-        -- 无图片时的纯色备用
+        -- 无图片时纯色备用 - 深蓝灰
         nvgBeginPath(vg)
         nvgRect(vg, 0, 0, screenW_, screenH_)
-        nvgFillColor(vg, nvgRGBA(20, 22, 30, 255))
+        nvgFillColor(vg, nvgRGBA(20, 22, 28, 255))
         nvgFill(vg)
         return
     end
@@ -326,21 +326,21 @@ function RenderButtons(vg)
         if glow > 10 then
             local strokeAlpha = math.floor(math.min(glow, 255) * 0.9)
 
-            -- 外层柔光（2层扩散）
+            -- 外层柔光（2层扩散）- 宝蓝色交互主色
             for layer = 2, 1, -1 do
                 local ex = layer * 3
                 local a = math.floor(strokeAlpha * 0.25 / layer)
                 nvgBeginPath(vg)
                 nvgRoundedRect(vg, bx - ex, by - ex, bw + ex * 2, bh + ex * 2, 4 + ex)
-                nvgStrokeColor(vg, nvgRGBA(180, 220, 255, a))
+                nvgStrokeColor(vg, nvgRGBA(150, 200, 255, a))
                 nvgStrokeWidth(vg, 1.5)
                 nvgStroke(vg)
             end
 
-            -- 主边框
+            -- 主边框 - 宝蓝色
             nvgBeginPath(vg)
             nvgRoundedRect(vg, bx, by, bw, bh, 4)
-            nvgStrokeColor(vg, nvgRGBA(220, 240, 255, strokeAlpha))
+            nvgStrokeColor(vg, nvgRGBA(150, 200, 255, strokeAlpha))
             nvgStrokeWidth(vg, 1.5)
             nvgStroke(vg)
         end
@@ -379,12 +379,12 @@ function RenderCharacterPanel(vg)
     nvgScale(vg, panelScale, panelScale)
     nvgTranslate(vg, -screenW_ / 2, -screenH_ / 2)
 
-    -- 面板背景
+    -- 面板背景 - 深蓝灰底色 + 宝蓝边框
     nvgBeginPath(vg)
     nvgRoundedRect(vg, px, py, panelW, panelH, 16)
-    nvgFillColor(vg, nvgRGBA(30, 32, 45, alpha))
+    nvgFillColor(vg, nvgRGBA(20, 22, 28, alpha))
     nvgFill(vg)
-    nvgStrokeColor(vg, nvgRGBA(100, 140, 200, math.floor(alpha * 0.6)))
+    nvgStrokeColor(vg, nvgRGBA(150, 200, 255, math.floor(alpha * 0.6)))
     nvgStrokeWidth(vg, 1.5)
     nvgStroke(vg)
 
@@ -394,7 +394,7 @@ function RenderCharacterPanel(vg)
         nvgFontFaceId(vg, fontId)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
         nvgFontSize(vg, 22)
-        nvgFillColor(vg, nvgRGBA(255, 220, 100, alpha))
+        nvgFillColor(vg, nvgRGBA(160, 140, 90, alpha))
         nvgText(vg, screenW_ / 2, py + 18, "角色图鉴", nil)
 
         -- 角色卡片
@@ -406,51 +406,55 @@ function RenderCharacterPanel(vg)
             local ch = characters_[i]
             local cardX = px + 20 + (i - 1) * (cardW + 20)
 
-            -- 卡片背景
+            -- 卡片背景 - 灰蓝中底色
             nvgBeginPath(vg)
             nvgRoundedRect(vg, cardX, cardY, cardW, cardH, 10)
-            nvgFillColor(vg, nvgRGBA(40, 44, 60, alpha))
+            nvgFillColor(vg, nvgRGBA(50, 50, 55, alpha))
             nvgFill(vg)
             nvgStrokeColor(vg, nvgRGBA(ch.color[1], ch.color[2], ch.color[3], math.floor(alpha * 0.5)))
             nvgStrokeWidth(vg, 1)
             nvgStroke(vg)
 
-            -- 角色图标
-            nvgFontSize(vg, 36)
-            nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
-            nvgFillColor(vg, nvgRGBA(255, 255, 255, alpha))
-            nvgText(vg, cardX + cardW / 2, cardY + 12, ch.icon, nil)
+            -- 角色图片
+            if ch.image then
+                if not charImages_[i] then
+                    charImages_[i] = nvgCreateImage(vg, ch.image, 0)
+                end
+                local imgHandle = charImages_[i]
+                if imgHandle > 0 then
+                    local imgSize = math.min(cardW - 20, 80)
+                    local imgX = cardX + (cardW - imgSize) / 2
+                    local imgY = cardY + 8
+                    local imgPat = nvgImagePattern(vg, imgX, imgY, imgSize, imgSize, 0, imgHandle, alpha / 255.0)
+                    nvgBeginPath(vg)
+                    nvgRoundedRect(vg, imgX, imgY, imgSize, imgSize, 6)
+                    nvgFillPaint(vg, imgPat)
+                    nvgFill(vg)
+                end
+            end
 
             -- 名称
             nvgFontSize(vg, 16)
+            nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
             nvgFillColor(vg, nvgRGBA(ch.color[1], ch.color[2], ch.color[3], alpha))
-            nvgText(vg, cardX + cardW / 2, cardY + 55, ch.name, nil)
+            nvgText(vg, cardX + cardW / 2, cardY + 95, ch.name, nil)
 
-            -- 描述（多行文本）
+            -- 描述（多行文本）- 银灰色
             nvgFontSize(vg, 11)
             nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
-            nvgFillColor(vg, nvgRGBA(190, 195, 210, alpha))
+            nvgFillColor(vg, nvgRGBA(120, 130, 140, alpha))
             local descLines = SplitLines(ch.desc)
-            local lineY = cardY + 80
+            local lineY = cardY + 118
             for j = 1, #descLines do
                 nvgText(vg, cardX + 12, lineY, descLines[j], nil)
                 lineY = lineY + 15
             end
-
-            -- 属性
-            nvgFontSize(vg, 11)
-            nvgFillColor(vg, nvgRGBA(160, 200, 240, alpha))
-            local statY = cardY + cardH - 15 * #ch.stats - 10
-            for j = 1, #ch.stats do
-                nvgText(vg, cardX + 12, statY, ch.stats[j], nil)
-                statY = statY + 15
-            end
         end
 
-        -- 底部提示
+        -- 底部提示 - 银灰色
         nvgFontSize(vg, 11)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
-        nvgFillColor(vg, nvgRGBA(140, 140, 160, math.floor(alpha * 0.7)))
+        nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.7)))
         nvgText(vg, screenW_ / 2, py + panelH - 10, "点击任意位置关闭", nil)
     end
 

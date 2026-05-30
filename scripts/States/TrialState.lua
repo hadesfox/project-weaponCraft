@@ -38,7 +38,6 @@ local inputRight_ = false
 -- 攻击系统
 -- ============================================================================
 local attacks_ = {}
-local attackIndex_ = 1
 local attacking_ = false
 local attackTimer_ = 0
 local attackDuration_ = 0
@@ -52,6 +51,7 @@ local isComposite_ = false
 local currentForm_ = 1            -- 当前形态 (1 或 2)
 local formAttacks_ = { {}, {} }   -- 两种形态的攻击组
 local formNames_ = { "", "" }     -- 形态名称
+local formStrokes_ = { {}, {} }   -- 两种形态的武器笔画（仅闭合结构）
 local transformAnim_ = 0          -- 变形动画计时
 
 -- ============================================================================
@@ -93,6 +93,9 @@ local FRAME_DURATION = 0.10    -- 每帧持续时间(秒)
 
 -- UI 引用
 local uiRoot_ = nil
+
+-- 敌人贴图
+local enemyImage_ = nil
 
 -- 内部函数前向声明
 local PrepareWeaponStrokes
@@ -190,6 +193,8 @@ function TrialState.Enter(gameData, onComplete)
     for i = 1, #runFramePaths do
         playerRunFrames_[i] = nvgCreateImage(NVG.Get(), runFramePaths[i], 0)
     end
+    -- 加载敌人贴图
+    enemyImage_ = nvgCreateImage(NVG.Get(), Config.Trial.EnemyImage, 0)
     playerFrameIndex_ = 1
     playerFrameTimer_ = 0
     
@@ -204,17 +209,105 @@ function TrialState.Enter(gameData, onComplete)
     print("[TrialState] Entered. Weapon: " .. weaponType .. " Composite: " .. tostring(isComposite_))
 end
 
+--- 归一化一组笔画（以它们自身的包围盒为中心，缩放到 targetSize）
+--- @param strokes table[] 原始笔画
+--- @param targetSize number 目标尺寸
+--- @return table[] 归一化后的笔画, number 缩放系数
+local function NormalizeStrokesToCenter(strokes, targetSize)
+    if not strokes or #strokes == 0 then return {}, 1.0 end
+    
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
+    for i = 1, #strokes do
+        local pts = strokes[i].points
+        for j = 1, #pts do
+            minX = math.min(minX, pts[j].x)
+            minY = math.min(minY, pts[j].y)
+            maxX = math.max(maxX, pts[j].x)
+            maxY = math.max(maxY, pts[j].y)
+        end
+    end
+    local bw = math.max(1, maxX - minX)
+    local bh = math.max(1, maxY - minY)
+    local cx = (minX + maxX) / 2
+    local cy = (minY + maxY) / 2
+    local scale = targetSize / math.max(bw, bh)
+    
+    local result = {}
+    for i = 1, #strokes do
+        local src = strokes[i]
+        local normalizedPts = {}
+        for j = 1, #src.points do
+            normalizedPts[j] = {
+                x = (src.points[j].x - cx) * scale,
+                y = (src.points[j].y - cy) * scale,
+            }
+        end
+        result[i] = { points = normalizedPts, closed = src.closed }
+    end
+    return result, scale
+end
+
 --- 准备武器笔画（归一化到以原点为中心的坐标）
+--- 复合武器时，将闭合结构分离到两个形态
 PrepareWeaponStrokes = function()
     weaponStrokes_ = {}
+    formStrokes_ = { {}, {} }
     
     local strokes = gameData_.strokes
     if not strokes or #strokes == 0 then return end
     
-    -- 计算所有笔画的整体包围盒
+    local isComp = gameData_.weaponData and gameData_.weaponData.isComposite or false
+    
+    if isComp then
+        -- 复合武器：将闭合结构分配到两个形态
+        local closedStrokes = {}
+        for i = 1, #strokes do
+            if strokes[i].closed then
+                closedStrokes[#closedStrokes + 1] = strokes[i]
+            end
+        end
+        
+        if #closedStrokes >= 2 then
+            -- 分配：第一个闭合结构 → 形态1，第二个 → 形态2
+            -- 如果超过2个，交替分配
+            local group1 = {}
+            local group2 = {}
+            for i = 1, #closedStrokes do
+                if i % 2 == 1 then
+                    group1[#group1 + 1] = closedStrokes[i]
+                else
+                    group2[#group2 + 1] = closedStrokes[i]
+                end
+            end
+            
+            local targetSize = 60
+            formStrokes_[1] = NormalizeStrokesToCenter(group1, targetSize)
+            formStrokes_[2] = NormalizeStrokesToCenter(group2, targetSize)
+            
+            -- 默认显示形态1
+            weaponStrokes_ = formStrokes_[1]
+            weaponScale_ = targetSize / 60  -- 归一化后的比例
+        else
+            -- 只有1个闭合结构：整体作为统一笔画（退化为普通武器渲染）
+            local allNorm, scale = NormalizeStrokesToCenter(strokes, 60)
+            weaponStrokes_ = allNorm
+            weaponScale_ = scale
+            formStrokes_[1] = allNorm
+            formStrokes_[2] = allNorm
+        end
+    else
+        -- 非复合武器：所有笔画统一归一化
+        local allNorm, scale = NormalizeStrokesToCenter(strokes, 60)
+        weaponStrokes_ = allNorm
+        weaponScale_ = scale
+        formStrokes_[1] = allNorm
+        formStrokes_[2] = allNorm
+    end
+    
+    -- 计算整体包围盒（用于其他用途）
     local allMinX, allMinY = math.huge, math.huge
     local allMaxX, allMaxY = -math.huge, -math.huge
-    
     for i = 1, #strokes do
         local pts = strokes[i].points
         for j = 1, #pts do
@@ -224,39 +317,9 @@ PrepareWeaponStrokes = function()
             allMaxY = math.max(allMaxY, pts[j].y)
         end
     end
-    
-    local bw = allMaxX - allMinX
-    local bh = allMaxY - allMinY
-    if bw < 1 then bw = 1 end
-    if bh < 1 then bh = 1 end
-    
-    -- 中心点
-    local cx = (allMinX + allMaxX) / 2
-    local cy = (allMinY + allMaxY) / 2
-    
-    -- 目标武器尺寸（根据攻击范围缩放）
-    local targetSize = 60  -- 武器渲染目标尺寸（像素）
-    weaponScale_ = targetSize / math.max(bw, bh)
-    
     weaponBounds_ = { minX = allMinX, minY = allMinY, maxX = allMaxX, maxY = allMaxY }
     
-    -- 归一化笔画：中心移到 (0, 0)，缩放到目标尺寸
-    for i = 1, #strokes do
-        local src = strokes[i]
-        local normalizedPts = {}
-        for j = 1, #src.points do
-            normalizedPts[j] = {
-                x = (src.points[j].x - cx) * weaponScale_,
-                y = (src.points[j].y - cy) * weaponScale_,
-            }
-        end
-        weaponStrokes_[i] = {
-            points = normalizedPts,
-            closed = src.closed,
-        }
-    end
-    
-    print("[TrialState] Weapon strokes: " .. #weaponStrokes_ .. " | Scale: " .. string.format("%.2f", weaponScale_))
+    print("[TrialState] Weapon strokes: " .. #weaponStrokes_ .. " | Composite forms: " .. #formStrokes_[1] .. " / " .. #formStrokes_[2])
 end
 
 --- 设置变形系统
@@ -287,7 +350,6 @@ SetupTransformSystem = function()
         formNames_[1] = (Config.WeaponTypes[weaponType] or Config.WeaponTypes.UNKNOWN).name
     end
     
-    attackIndex_ = 1
     attacking_ = false
     currentAttack_ = nil
 end
@@ -313,8 +375,10 @@ DoTransform = function()
     -- 切换形态
     currentForm_ = currentForm_ == 1 and 2 or 1
     attacks_ = formAttacks_[currentForm_]
-    attackIndex_ = 1
     transformAnim_ = 1.0  -- 触发变形动画
+    
+    -- 切换武器图案（核心：使用对应形态的闭合结构笔画）
+    weaponStrokes_ = formStrokes_[currentForm_]
     
     -- 更新 HUD
     local formLabel = uiRoot_ and uiRoot_:FindById("trialFormLabel")
@@ -322,7 +386,7 @@ DoTransform = function()
         formLabel:SetText("形态: " .. formNames_[currentForm_])
     end
     
-    print("[TrialState] Transform! Now form " .. currentForm_ .. ": " .. formNames_[currentForm_])
+    print("[TrialState] Transform! Now form " .. currentForm_ .. ": " .. formNames_[currentForm_] .. " | Strokes: " .. #weaponStrokes_)
 end
 
 --- 离开试炼状态
@@ -334,6 +398,10 @@ function TrialState.Leave()
     if playerImage_ and playerImage_ ~= 0 then
         nvgDeleteImage(NVG.Get(), playerImage_)
         playerImage_ = nil
+    end
+    if enemyImage_ and enemyImage_ ~= 0 then
+        nvgDeleteImage(NVG.Get(), enemyImage_)
+        enemyImage_ = nil
     end
     -- 释放跑步帧
     for i = 1, #playerRunFrames_ do
@@ -416,8 +484,9 @@ SpawnTargets = function()
             rx = pdef.rx + pdef.rw / 2 + (math.random() - 0.5) * 0.04
             ry = pdef.ry + size / arenaH + 0.01
         else
+            -- 地面敌人：直接贴地（ry=0 表示站在地面线上）
             rx = 0.05 + math.random() * 0.9
-            ry = (size + math.random(5, 80) * physScale_) / arenaH
+            ry = 0
         end
         targetDefs_[i] = { rx = rx, ry = ry, baseSize = baseSize }
         targets_[i] = {
@@ -548,7 +617,7 @@ function TrialState.BuildUI()
                     },
                     -- 中间：操作提示
                     UI.Label {
-                        text = isComposite_ and "AD移动|空格跳|J攻击|Q变形" or "AD移动|空格跳|J攻击",
+                        text = isComposite_ and "AD移动|空格跳|左键攻击1|右键攻击2|Q变形" or "AD移动|空格跳|左键攻击1|右键攻击2",
                         fontSize = 9,
                         fontColor = { 140, 140, 160, 160 },
                     },
@@ -706,14 +775,15 @@ DoJump = function()
 end
 
 --- 发起攻击
-StartAttack = function()
+--- @param index number|nil 攻击索引（1=左键招式, 2=右键招式），nil时默认为1
+StartAttack = function(index)
     if attacking_ then return end
     if #attacks_ == 0 then return end
     
-    currentAttack_ = attacks_[attackIndex_]
-    attackIndex_ = attackIndex_ + 1
-    if attackIndex_ > #attacks_ then attackIndex_ = 1 end
+    local idx = index or 1
+    if idx > #attacks_ then idx = 1 end
     
+    currentAttack_ = attacks_[idx]
     attacking_ = true
     attackTimer_ = 0
     attackDuration_ = currentAttack_.duration
@@ -978,8 +1048,10 @@ end
 function TrialState.OnKeyDown(key)
     if key == KEY_SPACE or key == KEY_W or key == KEY_UP then
         DoJump()
-    elseif key == KEY_J or key == KEY_K then
-        StartAttack()
+    elseif key == KEY_J then
+        StartAttack(1)  -- J键 = 招式1（同左键）
+    elseif key == KEY_K then
+        StartAttack(2)  -- K键 = 招式2（同右键）
     elseif key == KEY_Q then
         DoTransform()
     end
@@ -987,7 +1059,9 @@ end
 
 function TrialState.OnMouseDown(button)
     if button == MOUSEB_LEFT then
-        StartAttack()
+        StartAttack(1)  -- 左键 = 招式1
+    elseif button == MOUSEB_RIGHT then
+        StartAttack(2)  -- 右键 = 招式2
     end
 end
 
@@ -1001,8 +1075,10 @@ function TrialState.OnTouchBegin(x, y)
     local dpr = graphics:GetDPR()
     local tx = x / dpr
     
-    if tx > screenW_ * 0.6 then
-        StartAttack()
+    if tx > screenW_ * 0.75 then
+        StartAttack(2)  -- 右侧区域 = 招式2
+    elseif tx > screenW_ * 0.55 then
+        StartAttack(1)  -- 中右区域 = 招式1
     elseif tx > screenW_ * 0.3 then
         DoJump()
     end
@@ -1084,8 +1160,8 @@ end
 --- 背景渐变
 RenderBackground = function(vg)
     local bgPaint = nvgLinearGradient(vg, 0, 0, 0, screenH_,
-        nvgRGBA(30, 35, 60, 255),
-        nvgRGBA(60, 50, 80, 255))
+        nvgRGBA(20, 22, 28, 255),
+        nvgRGBA(50, 50, 55, 255))
     nvgBeginPath(vg)
     nvgRect(vg, 0, 0, screenW_, screenH_)
     nvgFillPaint(vg, bgPaint)
@@ -1105,8 +1181,8 @@ end
 --- 地面
 RenderGround = function(vg)
     local groundPaint = nvgLinearGradient(vg, 0, groundY_, 0, screenH_,
-        nvgRGBA(60, 80, 50, 255),
-        nvgRGBA(40, 55, 35, 255))
+        nvgRGBA(40, 38, 35, 255),
+        nvgRGBA(20, 22, 28, 255))
     nvgBeginPath(vg)
     nvgRect(vg, 0, groundY_, screenW_, screenH_ - groundY_)
     nvgFillPaint(vg, groundPaint)
@@ -1115,7 +1191,7 @@ RenderGround = function(vg)
     nvgBeginPath(vg)
     nvgMoveTo(vg, 0, groundY_)
     nvgLineTo(vg, screenW_, groundY_)
-    nvgStrokeColor(vg, nvgRGBA(90, 120, 70, 200))
+    nvgStrokeColor(vg, nvgRGBA(100, 80, 50, 200))
     nvgStrokeWidth(vg, 2)
     nvgStroke(vg)
 end
@@ -1126,18 +1202,22 @@ RenderPlatforms = function(vg)
         local p = platforms_[i]
         nvgBeginPath(vg)
         nvgRoundedRect(vg, p.x, p.y, p.w, p.h, 4)
-        nvgFillColor(vg, nvgRGBA(80, 70, 60, 230))
+        nvgFillColor(vg, nvgRGBA(45, 42, 38, 240))
         nvgFill(vg)
+        nvgStrokeColor(vg, nvgRGBA(70, 60, 45, 180))
+        nvgStrokeWidth(vg, 1)
+        nvgStroke(vg)
+        -- 平台顶部高光线
         nvgBeginPath(vg)
         nvgMoveTo(vg, p.x + 2, p.y)
         nvgLineTo(vg, p.x + p.w - 2, p.y)
-        nvgStrokeColor(vg, nvgRGBA(140, 130, 110, 200))
+        nvgStrokeColor(vg, nvgRGBA(100, 80, 50, 220))
         nvgStrokeWidth(vg, 2)
         nvgStroke(vg)
     end
 end
 
---- 渲染靶子
+--- 渲染靶子（哥布林）
 RenderTargets = function(vg)
     for i = 1, #targets_ do
         local t = targets_[i]
@@ -1147,22 +1227,27 @@ RenderTargets = function(vg)
         if t.alive then
             local scale = 1.0 - math.max(0, t.spawnAnim) * 0.5
             local sz = t.size * scale
+            local imgW = sz * 1.6
+            local imgH = sz * 2.0
             
-            nvgBeginPath(vg)
-            nvgRoundedRect(vg, tx - sz * 0.4, ty - sz, sz * 0.8, sz * 2, 3)
-            nvgFillColor(vg, nvgRGBA(140, 90, 50, 230))
-            nvgFill(vg)
-            
-            nvgBeginPath(vg)
-            nvgCircle(vg, tx, ty, sz * 0.3)
-            nvgFillColor(vg, nvgRGBA(200, 60, 60, 200))
-            nvgFill(vg)
-            nvgBeginPath(vg)
-            nvgCircle(vg, tx, ty, sz * 0.15)
-            nvgFillColor(vg, nvgRGBA(255, 255, 255, 200))
-            nvgFill(vg)
+            if enemyImage_ and enemyImage_ ~= 0 then
+                -- 用红色史莱姆图片渲染（下移 20% 补偿图片内透明边距）
+                local imgY = groundY_ - imgH * 0.80
+                local imgPaint = nvgImagePattern(vg, tx - imgW / 2, imgY, imgW, imgH, 0, enemyImage_, 1.0)
+                nvgBeginPath(vg)
+                nvgRect(vg, tx - imgW / 2, imgY, imgW, imgH)
+                nvgFillPaint(vg, imgPaint)
+                nvgFill(vg)
+            else
+                -- 无图时的备用矩形
+                nvgBeginPath(vg)
+                nvgRoundedRect(vg, tx - sz * 0.4, ty - sz, sz * 0.8, sz * 2, 3)
+                nvgFillColor(vg, nvgRGBA(50, 50, 55, 230))
+                nvgFill(vg)
+            end
             
         elseif t.hitAnim > 0 then
+            -- 死亡碎片效果（炭火红）
             local alpha = math.floor(t.hitAnim * 200)
             local expand = (1 - t.hitAnim) * 30
             for a = 0, 4 do
@@ -1171,7 +1256,7 @@ RenderTargets = function(vg)
                 local fy = ty + math.sin(angle) * expand
                 nvgBeginPath(vg)
                 nvgRect(vg, fx - 4, fy - 4, 8, 8)
-                nvgFillColor(vg, nvgRGBA(180, 120, 60, alpha))
+                nvgFillColor(vg, nvgRGBA(200, 80, 40, alpha))
                 nvgFill(vg)
             end
         end
@@ -1196,11 +1281,11 @@ RenderDummy = function(vg)
     -- 木桩主体（圆柱形木桩）
     nvgBeginPath(vg)
     nvgRoundedRect(vg, dx - dw / 2 + shakeX, dy - dh, dw, dh, 4)
-    nvgFillColor(vg, nvgRGBA(120, 85, 50, 240))
+    nvgFillColor(vg, nvgRGBA(50, 50, 55, 240))
     nvgFill(vg)
     
     -- 木纹
-    nvgStrokeColor(vg, nvgRGBA(90, 60, 35, 150))
+    nvgStrokeColor(vg, nvgRGBA(150, 200, 255, 150))
     nvgStrokeWidth(vg, 1)
     for i = 1, 3 do
         local ly = dy - dh * i / 4
@@ -1215,7 +1300,7 @@ RenderDummy = function(vg)
     local armH = 8 * physScale_
     nvgBeginPath(vg)
     nvgRoundedRect(vg, dx - armW / 2 + shakeX, dy - dh - armH / 2, armW, armH, 3)
-    nvgFillColor(vg, nvgRGBA(100, 70, 40, 240))
+    nvgFillColor(vg, nvgRGBA(50, 50, 55, 240))
     nvgFill(vg)
     
     -- 受击闪光
@@ -1230,7 +1315,7 @@ RenderDummy = function(vg)
     -- 底座
     nvgBeginPath(vg)
     nvgRoundedRect(vg, dx - dw * 0.8 + shakeX, dy - 6 * physScale_, dw * 1.6, 6 * physScale_, 2)
-    nvgFillColor(vg, nvgRGBA(80, 60, 40, 240))
+    nvgFillColor(vg, nvgRGBA(20, 22, 28, 240))
     nvgFill(vg)
     
     -- 标签
@@ -1239,7 +1324,7 @@ RenderDummy = function(vg)
         nvgFontFaceId(vg, fontId)
         nvgFontSize(vg, 10 * physScale_)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
-        nvgFillColor(vg, nvgRGBA(180, 160, 140, 200))
+        nvgFillColor(vg, nvgRGBA(120, 130, 140, 200))
         nvgText(vg, dx + shakeX, dy - dh - 10 * physScale_, "木桩", nil)
     end
 end
@@ -1513,7 +1598,7 @@ RenderPlayerSprite = function(vg, bobY, lean, scaleX, scaleY)
         -- 无图片时的备用矩形
         nvgBeginPath(vg)
         nvgRoundedRect(vg, px, py + bobY, pw, ph, 4)
-        nvgFillColor(vg, nvgRGBA(80, 160, 255, 230))
+        nvgFillColor(vg, nvgRGBA(150, 200, 255, 230))
         nvgFill(vg)
         nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 180))
         nvgStrokeWidth(vg, 2)
@@ -1533,11 +1618,11 @@ RenderRunDust = function(vg, bobY)
         local dustDir = player_.facingRight and -1 or 1
         nvgBeginPath(vg)
         nvgCircle(vg, footX + dustDir * 6 * physScale_, footY - 2 * physScale_, 3 * physScale_)
-        nvgFillColor(vg, nvgRGBA(200, 180, 150, alpha))
+        nvgFillColor(vg, nvgRGBA(120, 130, 140, alpha))
         nvgFill(vg)
         nvgBeginPath(vg)
         nvgCircle(vg, footX + dustDir * 12 * physScale_, footY - 4 * physScale_, 2 * physScale_)
-        nvgFillColor(vg, nvgRGBA(200, 180, 150, math.floor(alpha * 0.6)))
+        nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.6)))
         nvgFill(vg)
     end
 end
@@ -1581,8 +1666,9 @@ RenderCombo = function(vg)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
     
     local alpha = math.floor(255 * math.max(0, 1.0 - comboTimer_ / Config.Trial.ComboDecayTime))
-    nvgFillColor(vg, nvgRGBA(255, 200, 50, alpha))
+    nvgFillColor(vg, nvgRGBA(160, 140, 90, alpha))
     nvgText(vg, screenW_ / 2, 90, combo_ .. " COMBO!", nil)
+
 end
 
 --- 变形特效渲染
@@ -1597,7 +1683,8 @@ RenderTransformEffect = function(vg)
     -- 变形光环
     nvgBeginPath(vg)
     nvgCircle(vg, cx, cy, 20 + expand)
-    nvgStrokeColor(vg, nvgRGBA(255, 200, 50, alpha))
+    nvgStrokeColor(vg, nvgRGBA(160, 140, 90, alpha))
+
     nvgStrokeWidth(vg, 3 * transformAnim_)
     nvgStroke(vg)
     
@@ -1609,7 +1696,7 @@ RenderTransformEffect = function(vg)
         local py = cy + math.sin(angle) * r
         nvgBeginPath(vg)
         nvgCircle(vg, px, py, 3 * transformAnim_)
-        nvgFillColor(vg, nvgRGBA(255, 220, 80, alpha))
+        nvgFillColor(vg, nvgRGBA(160, 140, 90, alpha))
         nvgFill(vg)
     end
     
@@ -1621,7 +1708,7 @@ RenderTransformEffect = function(vg)
             nvgFontSize(vg, 16)
             nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
             local textAlpha = math.floor((transformAnim_ - 0.5) * 2 * 255)
-            nvgFillColor(vg, nvgRGBA(255, 220, 80, textAlpha))
+            nvgFillColor(vg, nvgRGBA(160, 140, 90, textAlpha))
             nvgText(vg, cx, cy - 35, formNames_[currentForm_], nil)
         end
     end

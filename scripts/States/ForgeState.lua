@@ -22,7 +22,8 @@ local hammerSound_ = nil
 local quenchSound_ = nil
 local audioScene_ = nil
 local audioNode_ = nil
-local quenchSource_ = nil  -- 淬火循环音源（持续播放/停止）
+local hammerSource_ = nil  -- 锤击音源（预创建，复用）
+local quenchSource_ = nil  -- 淬火循环音源（预创建，复用）
 
 -- 锻造阶段
 local PHASE_HAMMER = 1   -- 锤击
@@ -46,6 +47,7 @@ local hammerCooldown_ = 0    -- 锤击后短暂冷却
 local hammerDone_ = false    -- 锤击是否已完成（等待展示结果）
 local hammerResultTimer_ = 0 -- 锤击结果展示倒计时
 local hammerScore_ = 0       -- 锤击阶段得分（用于展示）
+local hammerWaitClick_ = false -- 锤击结果展示完毕后，等待玩家点击进入淬火
 local hammerTimeLeft_ = 0    -- 锤击阶段剩余时间
 local hammerZoneCenter_ = 0  -- 判定区域中心位置（-1~1范围内随机）
 local HAMMER_RESULT_DURATION = 1.0  -- 锤击结果展示时间（秒）
@@ -56,6 +58,7 @@ local quenchTemp_ = 800      -- 当前温度
 local quenchTarget_ = 450    -- 目标温度
 local quenchTolerance_ = 30  -- 目标容差范围（±30度内为完美）
 local quenchHolding_ = false -- 是否正在按住冷却
+local quenchHoldTime_ = 0    -- 本次按住持续时间（用于加速降温）
 local quenchScore_ = 0       -- 淬火评分
 local quenchDone_ = false
 local quenchTimer_ = 0       -- 淬火已用时间
@@ -88,7 +91,7 @@ function ForgeState.Enter(gameData, onComplete)
     totalScore_ = 0
     finishTimer_ = -1
     
-    -- 预创建音频节点（避免首次播放延迟）
+    -- 预创建音频节点和音源（避免首次播放延迟）
     audioScene_ = Scene()
     audioNode_ = audioScene_:CreateChild("ForgeSFX")
     
@@ -101,7 +104,21 @@ function ForgeState.Enter(gameData, onComplete)
     if quenchSound_ then
         quenchSound_.looped = true
     end
-    quenchSource_ = nil
+    
+    -- 预创建音源并静音预播放（warm-up：不立即Stop，让音频管线真正解码）
+    hammerSource_ = audioNode_:CreateComponent("SoundSource")
+    hammerSource_.soundType = SOUND_EFFECT
+    hammerSource_.gain = 0.0
+    if hammerSound_ then
+        hammerSource_:Play(hammerSound_)  -- 静音播放，非循环会自然结束
+    end
+    
+    quenchSource_ = audioNode_:CreateComponent("SoundSource")
+    quenchSource_.soundType = SOUND_EFFECT
+    quenchSource_.gain = 0.0
+    if quenchSound_ then
+        quenchSource_:Play(quenchSound_)  -- 静音播放，触发解码管线
+    end
     
     -- 初始化锤击
     InitHammerPhase()
@@ -114,6 +131,8 @@ function ForgeState.Leave()
     finishTimer_ = -1
     quenchHolding_ = false
     StopQuenchSound()
+    hammerSource_ = nil
+    quenchSource_ = nil
     if audioNode_ then
         audioNode_:Remove()
         audioNode_ = nil
@@ -145,6 +164,7 @@ InitHammerPhase = function()
     hammerReady_ = true
     hammerCooldown_ = 0
     hammerDone_ = false
+    hammerWaitClick_ = false
     hammerResultTimer_ = 0
     hammerScore_ = 0
     hammerTimeLeft_ = Config.Forge.HammerDuration
@@ -161,6 +181,7 @@ InitQuenchPhase = function()
     quenchTarget_ = 300 + math.random(0, 200) -- 随机目标（300~500）
     quenchTolerance_ = 30
     quenchHolding_ = false
+    quenchHoldTime_ = 0
     quenchScore_ = 0
     quenchDone_ = false
     quenchTimer_ = 0
@@ -278,12 +299,13 @@ UpdateHammer = function(dt)
     if hammerFlash_ > 0 then hammerFlash_ = hammerFlash_ - dt * 4 end
     if hammerShake_ > 0 then hammerShake_ = hammerShake_ - dt * 6 end
     
-    -- 如果已完成锤击，等待结果展示时间
+    -- 如果已完成锤击，等待结果展示时间，然后等待玩家点击
     if hammerDone_ then
-        hammerResultTimer_ = hammerResultTimer_ + dt
-        if hammerResultTimer_ >= HAMMER_RESULT_DURATION then
-            currentPhase_ = PHASE_QUENCH
-            InitQuenchPhase()
+        if not hammerWaitClick_ then
+            hammerResultTimer_ = hammerResultTimer_ + dt
+            if hammerResultTimer_ >= HAMMER_RESULT_DURATION then
+                hammerWaitClick_ = true  -- 展示完毕，等待玩家点击
+            end
         end
         return
     end
@@ -340,9 +362,12 @@ UpdateQuench = function(dt)
     -- 更新倒计时
     quenchTimer_ = quenchTimer_ + dt
     
-    -- 只有按住时才降温（不自然下降）
+    -- 只有按住时才降温（越按越快）
     if quenchHolding_ then
-        quenchTemp_ = quenchTemp_ - dt * 200
+        quenchHoldTime_ = quenchHoldTime_ + dt
+        -- 基础速率120°/s，每秒额外加速100°/s → 按住越久降温越猛
+        local rate = 120 + quenchHoldTime_ * 100
+        quenchTemp_ = quenchTemp_ - dt * rate
     end
     
     -- 3秒时间到，强制截止
@@ -403,23 +428,20 @@ FinishQuench = function()
     finishTimer_ = 0
 end
 
---- 播放锤击音效
+--- 播放锤击音效（复用预创建音源，无首次延迟）
 ---@diagnostic disable-next-line: redefined-local
 PlayHammerSound = function()
-    if not hammerSound_ or not audioNode_ then return end
-    local source = audioNode_:CreateComponent("SoundSource")
-    source.soundType = SOUND_EFFECT
-    source:Play(hammerSound_)
-    source.autoRemoveMode = REMOVE_COMPONENT
+    if not hammerSound_ or not hammerSource_ then return end
+    hammerSource_.gain = 1.0
+    hammerSource_:Play(hammerSound_)
 end
 
---- 开始播放淬火循环音效
+--- 开始播放淬火循环音效（复用预创建音源，无首次延迟）
 ---@diagnostic disable-next-line: redefined-local
 StartQuenchSound = function()
-    if not quenchSound_ or not audioNode_ then return end
-    if quenchSource_ then return end  -- 已在播放
-    quenchSource_ = audioNode_:CreateComponent("SoundSource")
-    quenchSource_.soundType = SOUND_EFFECT
+    if not quenchSound_ or not quenchSource_ then return end
+    if quenchSource_.gain > 0.5 and quenchSource_:IsPlaying() then return end  -- 已正式播放中
+    quenchSource_.gain = 1.0
     quenchSource_:Play(quenchSound_)
 end
 
@@ -428,8 +450,7 @@ end
 StopQuenchSound = function()
     if quenchSource_ then
         quenchSource_:Stop()
-        quenchSource_:Remove()
-        quenchSource_ = nil
+        quenchSource_.gain = 0.0
     end
 end
 
@@ -438,6 +459,14 @@ OnForgeInput = function()
     if finishTimer_ >= 0 then return end  -- 等待结束中忽略输入
 
     if currentPhase_ == PHASE_HAMMER then
+        -- 锤击完成后等待点击进入淬火
+        if hammerWaitClick_ then
+            currentPhase_ = PHASE_QUENCH
+            InitQuenchPhase()
+            return
+        end
+        -- 锤击结果展示中忽略输入
+        if hammerDone_ then return end
         -- 必须冷却完毕才能再次锤击
         if not hammerReady_ then return end
         if hammerHits_ < HAMMER_MAX_HITS then
@@ -566,7 +595,7 @@ local function RenderAnvilAndHammer(vg, cx, cy, shakeX, shakeY)
     if hammerFlash_ > 0 then
         nvgBeginPath(vg)
         nvgCircle(vg, cx + shakeX, cy + shakeY, 60 + (1 - hammerFlash_) * 40)
-        nvgFillColor(vg, nvgRGBA(255, 180, 50, math.floor(hammerFlash_ * 120)))
+        nvgFillColor(vg, nvgRGBA(200, 80, 40, math.floor(hammerFlash_ * 120)))
         nvgFill(vg)
     end
     
@@ -613,9 +642,9 @@ local function RenderRhythmBar(vg, cx, cy)
     -- 指示条背景
     nvgBeginPath(vg)
     nvgRoundedRect(vg, barX, barY, barW, barH, 6)
-    nvgFillColor(vg, nvgRGBA(30, 32, 40, 220))
+    nvgFillColor(vg, nvgRGBA(35, 36, 42, 240))
     nvgFill(vg)
-    nvgStrokeColor(vg, nvgRGBA(80, 80, 100, 200))
+    nvgStrokeColor(vg, nvgRGBA(80, 85, 95, 220))
     nvgStrokeWidth(vg, 1.5)
     nvgStroke(vg)
     
@@ -626,7 +655,7 @@ local function RenderRhythmBar(vg, cx, cy)
     local goodZonePixelW = GOOD_HALF * 2 * (barW / 2 - 6)
     nvgBeginPath(vg)
     nvgRoundedRect(vg, zoneCenterX - goodZonePixelW / 2, barY + 2, goodZonePixelW, barH - 4, 4)
-    nvgFillColor(vg, nvgRGBA(120, 120, 140, 50))
+    nvgFillColor(vg, nvgRGBA(70, 75, 85, 120))
     nvgFill(vg)
     
     -- perfect 区域
@@ -656,11 +685,11 @@ local function RenderRhythmBar(vg, cx, cy)
     nvgBeginPath(vg)
     nvgCircle(vg, cursorX, barY + barH / 2, 8)
     if distToZone <= PERFECT_HALF then
-        nvgFillColor(vg, nvgRGBA(255, 220, 50, 255))
+        nvgFillColor(vg, nvgRGBA(160, 140, 90, 255))
     elseif distToZone <= GOOD_HALF then
-        nvgFillColor(vg, nvgRGBA(150, 150, 170, 255))
+        nvgFillColor(vg, nvgRGBA(120, 130, 140, 255))
     else
-        nvgFillColor(vg, nvgRGBA(60, 60, 70, 255))
+        nvgFillColor(vg, nvgRGBA(90, 95, 105, 255))
     end
     nvgFill(vg)
     nvgStrokeColor(vg, nvgRGBA(255, 255, 255, 200))
@@ -691,17 +720,17 @@ local function RenderHammerDots(vg, cx, cy)
             if q == "perfect" then
                 nvgFillColor(vg, nvgRGBA(C_SUCCESS[1], C_SUCCESS[2], C_SUCCESS[3], 255))
             elseif q == "good" then
-                nvgFillColor(vg, nvgRGBA(150, 150, 170, 255))
+                nvgFillColor(vg, nvgRGBA(120, 130, 140, 255))
             else
-                nvgFillColor(vg, nvgRGBA(200, 60, 60, 255))
+                nvgFillColor(vg, nvgRGBA(C_DANGER[1], C_DANGER[2], C_DANGER[3], 255))
             end
         else
-            nvgFillColor(vg, nvgRGBA(50, 50, 60, 255))
+            nvgFillColor(vg, nvgRGBA(20, 22, 28, 255))
         end
         nvgFill(vg)
         nvgBeginPath(vg)
         nvgCircle(vg, dotX, dotsY, 9)
-        nvgStrokeColor(vg, nvgRGBA(120, 120, 130, 180))
+        nvgStrokeColor(vg, nvgRGBA(50, 50, 55, 180))
         nvgStrokeWidth(vg, 1.5)
         nvgStroke(vg)
     end
@@ -723,7 +752,7 @@ local function RenderHammerHUD(vg, w, cx, cy, dotsY)
         if hammerTimeLeft_ <= 3.0 then
             nvgFillColor(vg, nvgRGBA(C_DANGER[1], C_DANGER[2], C_DANGER[3], 255))
         else
-            nvgFillColor(vg, nvgRGBA(180, 180, 200, 200))
+            nvgFillColor(vg, nvgRGBA(120, 130, 140, 200))
         end
         nvgText(vg, w - 16, 50, timeText .. "s", nil)
     end
@@ -732,7 +761,7 @@ local function RenderHammerHUD(vg, w, cx, cy, dotsY)
     if hammerDone_ then
         nvgBeginPath(vg)
         nvgRoundedRect(vg, cx - 110, cy - 60, 220, 90, 12)
-        nvgFillColor(vg, nvgRGBA(20, 22, 30, 220))
+        nvgFillColor(vg, nvgRGBA(20, 22, 28, 220))
         nvgFill(vg)
         nvgStrokeColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 150))
         nvgStrokeWidth(vg, 2)
@@ -740,31 +769,36 @@ local function RenderHammerHUD(vg, w, cx, cy, dotsY)
         
         nvgFontSize(vg, 20)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-        nvgFillColor(vg, nvgRGBA(255, 220, 50, 255))
+        nvgFillColor(vg, nvgRGBA(160, 140, 90, 255))
         nvgText(vg, cx, cy - 40, "锤击完成!", nil)
         
         local gradeText
-        local gr, gg, gb = 255, 255, 255
+        local gr, gg, gb = 200, 205, 210
         if hammerScore_ >= 90 then
             gradeText = "完美锻造 " .. hammerScore_ .. "分"
-            gr, gg, gb = 255, 220, 50
+            gr, gg, gb = 160, 140, 90
         elseif hammerScore_ >= 70 then
             gradeText = "优秀锻造 " .. hammerScore_ .. "分"
-            gr, gg, gb = 100, 220, 100
+            gr, gg, gb = 80, 200, 120
         elseif hammerScore_ >= 50 then
             gradeText = "普通锻造 " .. hammerScore_ .. "分"
-            gr, gg, gb = 180, 180, 200
+            gr, gg, gb = 120, 130, 140
         else
             gradeText = "粗糙锻造 " .. hammerScore_ .. "分"
-            gr, gg, gb = 150, 100, 100
+            gr, gg, gb = 240, 80, 80
         end
         nvgFontSize(vg, 16)
         nvgFillColor(vg, nvgRGBA(gr, gg, gb, 255))
         nvgText(vg, cx, cy - 10, gradeText, nil)
         
-        nvgFontSize(vg, 12)
-        nvgFillColor(vg, nvgRGBA(180, 180, 200, 180))
-        nvgText(vg, cx, cy + 16, "即将进入淬火...", nil)
+        nvgFontSize(vg, 14)
+        if hammerWaitClick_ then
+            nvgFillColor(vg, nvgRGBA(160, 140, 90, 255))
+            nvgText(vg, cx, cy + 16, "👆 点击进入淬火", nil)
+        else
+            nvgFillColor(vg, nvgRGBA(120, 130, 140, 180))
+            nvgText(vg, cx, cy + 16, "准备进入淬火...", nil)
+        end
         return
     end
     
@@ -777,7 +811,7 @@ local function RenderHammerHUD(vg, w, cx, cy, dotsY)
     -- 提示文字
     nvgFontSize(vg, 13)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
-    nvgFillColor(vg, nvgRGBA(180, 180, 200, 200))
+    nvgFillColor(vg, nvgRGBA(120, 130, 140, 200))
     if hammerReady_ then
         nvgText(vg, cx, dotsY + 18, "光标到金色区域时点击!", nil)
     else
@@ -788,13 +822,13 @@ local function RenderHammerHUD(vg, w, cx, cy, dotsY)
     if hammerFlash_ > 0 and hammerHits_ > 0 then
         local lastQ = hammerHitQuality_[hammerHits_]
         local qText = ""
-        local qr, qg, qb = 200, 200, 200
+        local qr, qg, qb = 200, 205, 210
         if lastQ == "perfect" then
             qText = "完美!"
-            qr, qg, qb = 255, 220, 50
+            qr, qg, qb = 160, 140, 90
         elseif lastQ == "good" then
             qText = "不错"
-            qr, qg, qb = 150, 150, 170
+            qr, qg, qb = 120, 130, 140
         else
             qText = "失误!"
             qr, qg, qb = 200, 60, 60
@@ -838,11 +872,11 @@ local function RenderQuenchCountdown(vg, cx, cy, fontId)
     nvgBeginPath(vg)
     nvgCircle(vg, cx, countdownY, 38 * pulseScale)
     if remaining < 1.0 then
-        nvgFillColor(vg, nvgRGBA(240, 60, 60, 200))
+        nvgFillColor(vg, nvgRGBA(240, 80, 80, 200))
     elseif remaining < 2.0 then
-        nvgFillColor(vg, nvgRGBA(240, 160, 40, 180))
+        nvgFillColor(vg, nvgRGBA(200, 80, 40, 180))
     else
-        nvgFillColor(vg, nvgRGBA(60, 60, 80, 180))
+        nvgFillColor(vg, nvgRGBA(50, 50, 55, 180))
     end
     nvgFill(vg)
     
@@ -867,7 +901,7 @@ local function RenderThermometer(vg, cx, cy, fontId)
     -- 背景
     nvgBeginPath(vg)
     nvgRoundedRect(vg, barX - 4, barY - 4, barW + 8, barH + 8, 8)
-    nvgFillColor(vg, nvgRGBA(40, 42, 55, 255))
+    nvgFillColor(vg, nvgRGBA(50, 50, 55, 255))
     nvgFill(vg)
     
     -- 温度填充
@@ -877,11 +911,11 @@ local function RenderThermometer(vg, cx, cy, fontId)
     
     local r, g, b
     if fillRatio > 0.6 then
-        r, g, b = 240, 80, 40
+        r, g, b = 200, 80, 40      -- 炭火红（高温）
     elseif fillRatio > 0.3 then
-        r, g, b = 240, 160, 40
+        r, g, b = 160, 140, 90     -- 旧金（中温）
     else
-        r, g, b = 60, 140, 240
+        r, g, b = 150, 200, 255    -- 冰霜蓝（低温）
     end
     
     nvgBeginPath(vg)
@@ -895,14 +929,14 @@ local function RenderThermometer(vg, cx, cy, fontId)
     local tolRatioHalf = (quenchTolerance_ / maxTemp) * barH
     nvgBeginPath(vg)
     nvgRect(vg, barX - 12, targetY - tolRatioHalf, barW + 24, tolRatioHalf * 2)
-    nvgFillColor(vg, nvgRGBA(80, 255, 120, 35))
+    nvgFillColor(vg, nvgRGBA(150, 200, 255, 35))
     nvgFill(vg)
     
     -- 目标线
     nvgBeginPath(vg)
     nvgMoveTo(vg, barX - 16, targetY)
     nvgLineTo(vg, barX + barW + 16, targetY)
-    nvgStrokeColor(vg, nvgRGBA(80, 255, 120, 255))
+    nvgStrokeColor(vg, nvgRGBA(150, 200, 255, 255))
     nvgStrokeWidth(vg, 2.5)
     nvgStroke(vg)
     
@@ -910,7 +944,7 @@ local function RenderThermometer(vg, cx, cy, fontId)
     nvgFontFaceId(vg, fontId)
     nvgFontSize(vg, 13)
     nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
-    nvgFillColor(vg, nvgRGBA(80, 255, 120, 255))
+    nvgFillColor(vg, nvgRGBA(150, 200, 255, 255))
     nvgText(vg, barX + barW + 20, targetY, math.floor(quenchTarget_) .. "°", nil)
     
     -- 当前温度数字
@@ -924,7 +958,6 @@ end
 
 --- 渲染淬火状态提示
 local function RenderQuenchStatus(vg, cx, barBottom)
-    nvgFontSize(vg, 14)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
     if quenchDone_ then
         local diff = math.abs(quenchTemp_ - quenchTarget_)
@@ -934,22 +967,26 @@ local function RenderQuenchStatus(vg, cx, barBottom)
             nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 255))
         elseif diff <= 30 then
             resultText = "优秀!"
-            nvgFillColor(vg, nvgRGBA(80, 255, 120, 255))
+            nvgFillColor(vg, nvgRGBA(C_SUCCESS[1], C_SUCCESS[2], C_SUCCESS[3], 255))
         elseif diff <= 60 then
             resultText = "良好"
-            nvgFillColor(vg, nvgRGBA(100, 200, 255, 255))
+            nvgFillColor(vg, nvgRGBA(150, 200, 255, 255))
         else
             resultText = "偏差较大"
-            nvgFillColor(vg, nvgRGBA(200, 200, 200, 255))
+            nvgFillColor(vg, nvgRGBA(120, 130, 140, 255))
         end
-        nvgFontSize(vg, 20)
+        nvgFontSize(vg, 22)
         nvgText(vg, cx, barBottom + 42, resultText, nil)
     else
-        nvgFillColor(vg, nvgRGBA(180, 180, 200, 200))
+        nvgFillColor(vg, nvgRGBA(255, 255, 255, 230))
+        nvgFontSize(vg, 18)
         if quenchHolding_ then
             nvgText(vg, cx, barBottom + 42, "淬火中... 松开即停止!", nil)
         else
-            nvgText(vg, cx, barBottom + 42, "按住淬火，松开停止! 停在绿线上!", nil)
+            nvgText(vg, cx, barBottom + 42, "按住淬火，松开停止!", nil)
+            nvgFontSize(vg, 14)
+            nvgFillColor(vg, nvgRGBA(150, 200, 255, 200))
+            nvgText(vg, cx, barBottom + 64, "停在蓝线上!", nil)
         end
     end
 end

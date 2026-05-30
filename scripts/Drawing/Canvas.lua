@@ -188,7 +188,7 @@ function Canvas.Render(vg, offsetX, offsetY)
     nvgLineTo(vg, cx + 10, cy)
     nvgMoveTo(vg, cx, cy - 10)
     nvgLineTo(vg, cx, cy + 10)
-    nvgStrokeColor(vg, nvgRGBA(180, 180, 190, 120))
+    nvgStrokeColor(vg, nvgRGBA(120, 130, 140, 120))
     nvgStrokeWidth(vg, 1)
     nvgStroke(vg)
     
@@ -205,7 +205,7 @@ function Canvas.Render(vg, offsetX, offsetY)
     -- 画布边框
     nvgBeginPath(vg)
     nvgRoundedRect(vg, ox, oy, canvasW_, canvasH_, 12)
-    nvgStrokeColor(vg, nvgRGBA(80, 85, 100, 180))
+    nvgStrokeColor(vg, nvgRGBA(150, 200, 255, 180))
     nvgStrokeWidth(vg, 2)
     nvgStroke(vg)
 end
@@ -231,7 +231,7 @@ RenderStroke = function(vg, stroke, ox, oy)
     
     if stroke.closed then
         nvgClosePath(vg)
-        nvgFillColor(vg, nvgRGBA(40, 40, 50, 40))
+        nvgFillColor(vg, nvgRGBA(50, 50, 55, 40))
         nvgFill(vg)
     end
     

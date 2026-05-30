@@ -137,12 +137,12 @@ function ResultState.BuildUI()
                     UI.Label {
                         text = wd.typeInfo.icon .. " " .. wd.typeInfo.name,
                         fontSize = 14,
-                        fontColor = { 160, 160, 180, 255 },
+                        fontColor = { 120, 130, 140, 255 },
                     },
                     -- 分割线
                     UI.Panel {
                         width = "80%", height = 1,
-                        backgroundColor = { 80, 80, 100, 100 },
+                        backgroundColor = { 50, 50, 55, 100 },
                         marginTop = 4, marginBottom = 4,
                     },
                     -- 属性列表
@@ -166,12 +166,12 @@ function ResultState.BuildUI()
                                     UI.Label {
                                         text = "🔨 锤击",
                                         fontSize = 12,
-                                        fontColor = { 180, 180, 200, 255 },
+                                        fontColor = { 120, 130, 140, 255 },
                                     },
                                     UI.Label {
                                         text = tostring(gameData_.hammerScore or 0),
                                         fontSize = 12,
-                                        fontColor = { 180, 180, 200, 255 },
+                                        fontColor = { 120, 130, 140, 255 },
                                     },
                                 },
                             },
@@ -183,18 +183,18 @@ function ResultState.BuildUI()
                                     UI.Label {
                                         text = "💧 淬火",
                                         fontSize = 12,
-                                        fontColor = { 180, 180, 200, 255 },
+                                        fontColor = { 120, 130, 140, 255 },
                                     },
                                     UI.Label {
                                         text = tostring(gameData_.quenchScore or 0),
                                         fontSize = 12,
-                                        fontColor = { 180, 180, 200, 255 },
+                                        fontColor = { 120, 130, 140, 255 },
                                     },
                                 },
                             },
                             UI.Panel {
                                 width = "80%", height = 1,
-                                backgroundColor = { 80, 80, 100, 100 },
+                                backgroundColor = { 50, 50, 55, 100 },
                                 marginTop = 2, marginBottom = 2,
                             },
                             UI.Panel {
@@ -220,7 +220,7 @@ function ResultState.BuildUI()
                     wd.isComposite and UI.Panel {
                         width = "100%",
                         padding = 8,
-                        backgroundColor = { 255, 180, 50, 20 },
+                        backgroundColor = { 160, 140, 90, 20 },
                         borderRadius = 8,
                         children = {
                             UI.Label {
@@ -257,7 +257,7 @@ CreateStatRow = function(label, value)
             UI.Label {
                 text = label,
                 fontSize = 14,
-                fontColor = { 180, 180, 200, 255 },
+                fontColor = { 120, 130, 140, 255 },
             },
             UI.Label {
                 text = value,
