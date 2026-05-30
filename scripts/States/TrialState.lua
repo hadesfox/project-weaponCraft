@@ -602,9 +602,9 @@ function UpdatePlayerPhysics(dt)
     local wasOnGround = player_.prevOnGround
     player_.prevOnGround = player_.onGround
     
-    -- 检测刚落地 → 触发着地压缩
+    -- 检测刚落地 → 触发着地压缩回弹
     if player_.onGround and not wasOnGround then
-        player_.landSquash = 0.2  -- 压缩持续时间(秒)
+        player_.landSquash = 0.15  -- 压缩回弹总时长(秒)
     end
     
     -- 更新着地压缩计时
@@ -654,6 +654,7 @@ function DoJump()
     if player_.onGround then
         player_.vy = Config.Trial.JumpVelocity * physScale_
         player_.onGround = false
+        player_.landSquash = 0  -- 跳跃时立刻取消着地动画
     end
 end
 
@@ -1400,13 +1401,26 @@ function RenderPlayer(vg)
         scaleX = 1.0 - math.sin(t) * 0.01
     end
     
-    -- 着地压缩（覆盖其他缩放）
+    -- 着地压缩回弹（完整弹性曲线：压缩→回弹→恢复）
     if player_.landSquash > 0 then
-        local progress = player_.landSquash / 0.2  -- 1→0 衰减
-        local squashAmount = progress * 0.2  -- 最大压缩20%
-        scaleX = 1.0 + squashAmount * 0.6
-        scaleY = 1.0 - squashAmount
-        bobY = 0  -- 压缩时不弹跳
+        local total = 0.15  -- 总时长缩短为0.15秒
+        local t_norm = 1.0 - (player_.landSquash / total)  -- 0→1 进度
+        -- 弹性曲线：先压缩再回弹
+        local squash
+        if t_norm < 0.35 then
+            -- 前35%：快速压缩（0→最大压缩）
+            squash = (t_norm / 0.35) * 0.12
+        elseif t_norm < 0.65 then
+            -- 中间30%：回弹（压缩→拉伸）
+            local p = (t_norm - 0.35) / 0.3
+            squash = 0.12 * (1.0 - p * 2.0)  -- 0.12 → -0.12
+        else
+            -- 后35%：恢复到正常
+            local p = (t_norm - 0.65) / 0.35
+            squash = -0.12 * (1.0 - p)  -- -0.12 → 0
+        end
+        scaleX = 1.0 + squash * 0.5
+        scaleY = 1.0 - squash
     end
     
     -- === 渲染角色精灵 ===
