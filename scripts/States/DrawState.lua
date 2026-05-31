@@ -198,18 +198,18 @@ local function CalcCanvasBounds()
     local bottomBarH = 110
     
     -- 可用绘制区域
-    local areaX = 0
     local areaY = topBarH
-    local areaW = logW
     local areaH = logH - topBarH - bottomBarH
     
-    -- 正方形画布，取可用宽高较小值的 88%
-    local size = math.min(areaW * 0.88, areaH * 0.88)
+    -- 画布尺寸：受限于高度的78%和宽度的42%（超宽屏适配）
+    local maxByH = areaH * 0.78
+    local maxByW = logW * 0.42
+    local size = math.min(maxByH, maxByW)
     size = math.max(size, 150)
     
-    -- 居中放置
-    local cx = areaX + (areaW - size) / 2
-    local cy = areaY + (areaH - size) / 2
+    -- 始终相对于整个屏幕宽度水平居中，垂直偏上放置
+    local cx = (logW - size) / 2
+    local cy = areaY + (areaH - size) * 0.4
     
     return cx, cy, size
 end
@@ -231,12 +231,21 @@ function DrawState.Update(dt)
         end
     end
     
+    local dpr = graphics:GetDPR()
+    local logW = graphics:GetWidth() / dpr
+    
     local newX, newY, size
     if layoutOK then
-        size = math.min(areaW * 0.92, areaH * 0.92)
+        -- 画布正方形尺寸：高度限制为 78%，宽度限制为屏幕宽度的 42%
+        -- 超宽屏适配：画布不能太大导致被底栏遮挡
+        local maxByH = areaH * 0.78
+        local maxByW = logW * 0.42
+        size = math.min(maxByH, maxByW)
         size = math.max(size, 150)
-        newX = areaX + (areaW - size) / 2
-        newY = areaY + (areaH - size) / 2
+        -- 始终相对于整个屏幕宽度水平居中
+        newX = (logW - size) / 2
+        -- 垂直方向偏上放置（40%位置而非50%），避免与底栏重叠
+        newY = areaY + (areaH - size) * 0.4
     else
         -- Fallback: 直接根据屏幕尺寸计算
         newX, newY, size = CalcCanvasBounds()

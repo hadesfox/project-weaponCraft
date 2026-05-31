@@ -82,11 +82,31 @@ local dummyDef_ = nil
 -- 木桩武器（预制，用于测试武器碰撞）
 local dummyWeapon_ = nil  -- { x, y, angle, length, width, force, forceDir }
 
+-- 木桩攻击系统（使用玩家同款攻击模组）
+local dummyAttacking_ = false
+local dummyAttackTimer_ = 0
+local dummyAttackDuration_ = 0
+local dummyCurrentAttack_ = nil
+local dummyAttackCooldown_ = 0       -- 攻击间隔冷却
+local dummyAttackProgress_ = 0       -- 当前攻击进度 0~1
+local dummyFacingRight_ = false      -- 木桩面朝方向（朝向玩家）
+local DUMMY_ATTACK_INTERVAL_MIN = 1.5  -- 最短攻击间隔（秒）
+local DUMMY_ATTACK_INTERVAL_MAX = 3.5  -- 最长攻击间隔（秒）
+local dummyHitPlayer_ = false        -- 本次攻击是否已命中玩家
+
 -- 武器碰撞系统
 local weaponClashAnim_ = 0      -- 武器碰撞特效计时
 local weaponClashX_ = 0         -- 碰撞特效位置 X
 local weaponClashY_ = 0         -- 碰撞特效位置 Y
 local weaponClashCooldown_ = 0  -- 碰撞检测冷却
+
+-- 材质效果系统
+local materialEffect_ = nil     -- 当前材质效果ID（字符串）
+local materialAtkMod_ = 0       -- 攻击力修正
+local materialSpdMod_ = 0       -- 攻速修正
+local burnTimer_ = 0            -- 灼烧DOT累计计时
+local burnTickInterval_ = 1.0   -- 灼烧每秒一次
+local growthBonus_ = 0          -- 成长累计伤害加成
 
 -- 平台/靶子比例定义
 local platformDefs_ = {}
@@ -136,6 +156,8 @@ local CheckWaveClear
 local UpdateHUD
 local InitDummyWeapon
 local UpdateDummyWeapon
+local UpdateDummyAttack
+local CheckDummyAttackHitPlayer
 local CheckWeaponClash
 local GetPlayerWeaponCollider
 local UpdateWeaponClash
@@ -174,6 +196,14 @@ function TrialState.Enter(gameData, onComplete)
     
     -- 初始化变形系统
     SetupTransformSystem()
+    
+    -- 初始化材质效果
+    local mat = gameData_ and gameData_.material or nil
+    materialEffect_ = mat and mat.effect or nil
+    materialAtkMod_ = mat and mat.atkMod or 0
+    materialSpdMod_ = mat and mat.spdMod or 0
+    burnTimer_ = 0
+    growthBonus_ = 0
     
     -- 初始化分数
     score_ = 0
@@ -674,6 +704,7 @@ function TrialState.Update(dt)
     UpdatePlayerPhysics(dt)
     UpdateAttack(dt)
     UpdateTargets(dt)
+    UpdateDummyAttack(dt)
     UpdateDummyWeapon(dt)
     UpdateWeaponClash(dt)
     Slime.Update(dt, player_)
@@ -681,6 +712,29 @@ function TrialState.Update(dt)
     UpdateHitEffects(dt)
     UpdateTransformAnim(dt)
     CheckWaveClear()
+    
+    -- 材质效果：burn（灼烧）- 对木桩造成每秒2%最大HP真伤
+    if materialEffect_ == "burn" and dummy_ and dummy_.alive then
+        burnTimer_ = burnTimer_ + dt
+        if burnTimer_ >= burnTickInterval_ then
+            burnTimer_ = burnTimer_ - burnTickInterval_
+            local burnDmg = math.floor(Config.Combat.DummyHP * 0.02)
+            dummy_.hp = math.max(0, dummy_.hp - burnDmg)
+            dummy_.hitAnim = 0.3
+            hitEffects_[#hitEffects_ + 1] = {
+                x = dummy_.x + math.random(-10, 10),
+                y = dummy_.y - (dummy_.height or 60) * 0.5,
+                text = "灼烧-" .. burnDmg,
+                timer = 0.9,
+                color = { 100, 255, 80 },
+            }
+            if dummy_.hp <= 0 then
+                dummy_.alive = false
+                dummy_.hp = 0
+            end
+        end
+    end
+    
     UpdateHUD()
 end
 
@@ -694,7 +748,10 @@ end
 --- 玩家物理（横版重力）
 UpdatePlayerPhysics = function(dt)
     local speed = Config.Trial.MoveSpeed * physScale_
-    if attacking_ then speed = 0 end  -- 攻击时不能移动，避免惯性前冲
+    -- agile 效果：攻击时移速不减；否则攻击时清零
+    if attacking_ and materialEffect_ ~= "agile" then
+        speed = 0
+    end
     
     if inputLeft_ then
         player_.vx = -speed
@@ -833,7 +890,9 @@ StartAttack = function(index)
     attackTimer_ = 0
     -- 砥砺攻速加成：降低攻击持续时间（加成范围 0%~30%）
     local speedBonus = gameData_.attackSpeedBonus or 0
-    attackDuration_ = currentAttack_.duration * (1.0 - speedBonus)
+    -- 材质攻速修正：spdMod 正值加速（缩短持续时间），负值减速
+    local totalSpeedMod = speedBonus + materialSpdMod_
+    attackDuration_ = currentAttack_.duration * (1.0 - totalSpeedMod)
     attackHitTargets_ = {}
 end
 
@@ -979,15 +1038,37 @@ end
 HitTarget = function(index, target, atk, dir)
     attackHitTargets_[index] = true
     
-    -- 计算伤害
-    local dmg = atk.damage or 150
+    -- 计算伤害（应用材质攻击力修正 + 成长加成）
+    local baseDmg = atk.damage or 150
+    local dmg = math.floor(baseDmg * (1.0 + materialAtkMod_) * (1.0 + growthBonus_))
     target.hp = target.hp - dmg
     target.hitAnim = 0.5  -- 受击闪烁
     
-    -- 击退
+    -- 击退（heavy_blow: 击退距离+50%）
     local kb = atk.knockback or 8
+    if materialEffect_ == "heavy_blow" then
+        kb = kb * 1.5
+    end
     target.knockX = dir * math.abs(kb)
     target.knockY = -math.abs(kb) * 0.5
+    
+    -- 材质效果：lifesteal（嗜血）- 伤害15%回血显示
+    if materialEffect_ == "lifesteal" then
+        local healAmt = math.floor(dmg * 0.15)
+        hitEffects_[#hitEffects_ + 1] = {
+            x = player_.x, y = player_.y - 10,
+            text = "+" .. healAmt,
+            timer = 0.8,
+            color = { 80, 255, 80 },
+        }
+        -- 回复效果：减少下次受击的击退量（存储一个护盾值）
+        player_.healShield = (player_.healShield or 0) + healAmt * 0.3
+    end
+    
+    -- 材质效果：growth（成长）- 每次命中增加5%伤害，上限50%
+    if materialEffect_ == "growth" then
+        growthBonus_ = math.min(0.50, growthBonus_ + 0.05)
+    end
     
     -- 显示伤害数字
     hitEffects_[#hitEffects_ + 1] = {
@@ -1229,6 +1310,10 @@ function TrialState.Render(vg)
         targets = targets_,
         dummy = dummy_,
         dummyWeapon = dummyWeapon_,
+        dummyAttacking = dummyAttacking_,
+        dummyCurrentAttack = dummyCurrentAttack_,
+        dummyAttackProgress = dummyAttackProgress_,
+        dummyFacingRight = dummyFacingRight_,
         attacking = attacking_,
         currentAttack = currentAttack_,
         attackTimer = attackTimer_,
@@ -1274,6 +1359,144 @@ function TrialState.Render(vg)
 end
 
 -- ============================================================================
+-- 木桩攻击系统
+-- ============================================================================
+
+--- 更新木桩攻击AI（随机挥剑，使用与玩家相同的攻击模组）
+UpdateDummyAttack = function(dt)
+    if not dummy_ or not dummyWeapon_ then return end
+    if #attacks_ == 0 then return end
+
+    -- 木桩朝向玩家
+    dummyFacingRight_ = player_.x > dummy_.x
+
+    -- 攻击中：更新进度
+    if dummyAttacking_ then
+        dummyAttackTimer_ = dummyAttackTimer_ + dt
+        dummyAttackProgress_ = dummyAttackTimer_ / dummyAttackDuration_
+
+        if dummyAttackProgress_ >= 1.0 then
+            -- 攻击结束
+            dummyAttacking_ = false
+            dummyCurrentAttack_ = nil
+            dummyAttackProgress_ = 0
+            dummyHitPlayer_ = false
+            -- 设置下次攻击冷却
+            dummyAttackCooldown_ = DUMMY_ATTACK_INTERVAL_MIN
+                + math.random() * (DUMMY_ATTACK_INTERVAL_MAX - DUMMY_ATTACK_INTERVAL_MIN)
+        else
+            -- 检测是否命中玩家
+            CheckDummyAttackHitPlayer()
+        end
+        return
+    end
+
+    -- 冷却中
+    if dummyAttackCooldown_ > 0 then
+        dummyAttackCooldown_ = dummyAttackCooldown_ - dt
+        return
+    end
+
+    -- 发起新攻击：随机选择一个招式
+    local idx = math.random(1, #attacks_)
+    dummyCurrentAttack_ = attacks_[idx]
+    dummyAttacking_ = true
+    dummyAttackTimer_ = 0
+    dummyAttackProgress_ = 0
+    dummyHitPlayer_ = false
+    -- 木桩攻击稍慢于玩家（1.3倍持续时间）
+    dummyAttackDuration_ = dummyCurrentAttack_.duration * 1.3
+end
+
+--- 检测木桩攻击是否命中玩家
+CheckDummyAttackHitPlayer = function()
+    if not dummyAttacking_ or not dummyCurrentAttack_ then return end
+    if dummyHitPlayer_ then return end  -- 本次攻击已命中
+    if not dummy_ then return end
+
+    local atk = dummyCurrentAttack_
+    local dir = dummyFacingRight_ and 1 or -1
+    local originX = dummy_.x + dir * 10 * physScale_
+    local originY = dummy_.y - dummy_.height * 0.6
+    local range = atk.range * physScale_
+    local progress = dummyAttackProgress_
+
+    -- 计算木桩武器尖端位置
+    local tipX, tipY
+    if atk.isThrust then
+        -- 突刺
+        local eased = math.sin(progress * math.pi)  -- 0→1→0 前冲后收
+        local thrustLen = range * eased
+        tipX = originX + dir * thrustLen
+        tipY = originY
+    else
+        -- 挥动
+        local easedProgress = 1.0 - (1.0 - progress) * (1.0 - progress)
+        local arcDir = (atk.direction or 1)
+        local startAngle = math.rad(atk.startAngle or -60)
+        local sweepAngle = math.rad(atk.arc) * arcDir * easedProgress
+        local currentAngle
+        if dummyFacingRight_ then
+            currentAngle = startAngle + sweepAngle
+        else
+            currentAngle = math.pi - (startAngle + sweepAngle)
+        end
+        tipX = originX + math.cos(currentAngle) * range
+        tipY = originY + math.sin(currentAngle) * range
+    end
+
+    -- 检测是否命中玩家（简化：点到矩形距离）
+    local px = player_.x
+    local py = player_.y
+    local pw = player_.width
+    local ph = player_.height
+
+    -- 玩家中心
+    local pcx = px + pw / 2
+    local pcy = py - ph / 2
+
+    -- 武器线段中点到玩家中心距离
+    local midX = (originX + tipX) / 2
+    local midY = (originY + tipY) / 2
+    local dx = math.abs(midX - pcx)
+    local dy = math.abs(midY - pcy)
+    local hitRadius = range * 0.5 + pw * 0.3
+
+    if dx < hitRadius and dy < ph * 0.6 then
+        -- 命中！击退玩家
+        dummyHitPlayer_ = true
+        local knockDir = dummyFacingRight_ and 1 or -1
+        local kb = (atk.knockback or 8) * physScale_
+        
+        -- 材质效果：shatter（碎裂）- 受击伤害/击退+20%
+        if materialEffect_ == "shatter" then
+            kb = kb * 1.2
+        end
+        
+        -- 材质效果：lifesteal 护盾减免击退
+        local shield = player_.healShield or 0
+        if shield > 0 then
+            local reduction = math.min(shield, kb * 0.3)
+            kb = kb - reduction
+            player_.healShield = shield - reduction
+        end
+        
+        player_.vx = knockDir * kb * 6
+        player_.vy = -kb * 2.5
+        player_.onGround = false
+
+        -- 特效
+        hitEffects_[#hitEffects_ + 1] = {
+            x = pcx,
+            y = pcy - 10,
+            text = atk.name .. "!",
+            timer = 1.0,
+            color = { 255, 100, 80 },
+        }
+    end
+end
+
+-- ============================================================================
 -- 武器碰撞系统
 -- ============================================================================
 
@@ -1297,7 +1520,7 @@ InitDummyWeapon = function()
     print("[TrialState] Dummy weapon initialized (right side)")
 end
 
---- 更新木桩武器位置（跟随木桩）
+--- 更新木桩武器位置（跟随木桩 + 攻击动画）
 UpdateDummyWeapon = function(dt)
     if not dummyWeapon_ or not dummy_ then return end
     
@@ -1312,14 +1535,49 @@ UpdateDummyWeapon = function(dt)
         shakeX = math.sin(dummy_.hitAnim * 20) * 4 * dummy_.hitAnim * dummy_.hitDir
     end
     
-    -- 根部位置：木桩中心偏移
+    -- 根部位置：木桩手持武器位置
     local len = dw.length * physScale_
-    dw.rootX = dx + shakeX + dw.localOffsetX * physScale_
+    local dir = dummyFacingRight_ and 1 or -1
+    dw.forceDir = dir
+    dw.rootX = dx + shakeX + dir * 10 * physScale_
     dw.rootY = dy + dw.localOffsetY * dh
     
-    -- 尖端位置：根据角度和长度
-    dw.tipX = dw.rootX + math.cos(dw.angle) * len
-    dw.tipY = dw.rootY + math.sin(dw.angle) * len
+    -- 攻击中：武器跟随攻击弧度运动
+    if dummyAttacking_ and dummyCurrentAttack_ then
+        local atk = dummyCurrentAttack_
+        local range = atk.range * physScale_
+        local progress = dummyAttackProgress_
+        
+        if atk.isThrust then
+            -- 突刺动画
+            local eased = math.sin(progress * math.pi)
+            local thrustLen = range * eased
+            dw.tipX = dw.rootX + dir * thrustLen
+            dw.tipY = dw.rootY
+            dw.angle = dummyFacingRight_ and 0 or math.pi
+        else
+            -- 挥动动画（与玩家渲染逻辑一致）
+            local easedProgress = 1.0 - (1.0 - progress) * (1.0 - progress)
+            local arcDir = (atk.direction or 1)
+            local startAngle = math.rad(atk.startAngle or -60)
+            local sweepAngle = math.rad(atk.arc) * arcDir * easedProgress
+            local currentAngle
+            if dummyFacingRight_ then
+                currentAngle = startAngle + sweepAngle
+            else
+                currentAngle = math.pi - (startAngle + sweepAngle)
+            end
+            dw.tipX = dw.rootX + math.cos(currentAngle) * range
+            dw.tipY = dw.rootY + math.sin(currentAngle) * range
+            dw.angle = currentAngle
+        end
+    else
+        -- 静止/待机状态：武器斜持朝前
+        local idleAngle = dummyFacingRight_ and (-0.3) or (math.pi + 0.3)
+        dw.angle = idleAngle
+        dw.tipX = dw.rootX + math.cos(idleAngle) * len
+        dw.tipY = dw.rootY + math.sin(idleAngle) * len
+    end
 end
 
 --- 获取玩家武器当前碰撞数据（攻击时有效）
@@ -1448,6 +1706,21 @@ CheckWeaponClash = function(progress)
             timer = 1.0,
             color = { 255, 200, 80 },
         }
+        
+        -- 材质效果：thorns（反震）- 格挡时对木桩造成反伤
+        local mat = gameData_ and gameData_.material or nil
+        if mat and mat.effect == "thorns" then
+            local thornsDmg = 100
+            dummy_.hp = math.max(0, dummy_.hp - thornsDmg)
+            hitEffects_[#hitEffects_ + 1] = {
+                x = dummy_.x,
+                y = dummy_.y - (dummy_.height or 60) * 0.7,
+                text = "反伤-" .. thornsDmg,
+                timer = 1.2,
+                color = { 255, 160, 50 },
+            }
+            print("[WeaponClash] Thorns triggered! Dummy takes " .. thornsDmg .. " damage")
+        end
         
         -- 中断攻击
         attacking_ = false

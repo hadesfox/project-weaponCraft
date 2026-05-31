@@ -94,9 +94,18 @@ function ResultState.BuildUI()
     local wd = gameData_.weaponData
     local quality = gameData_.quality
     
+    -- 材质加成计算
+    local mat = gameData_.material
+    local displayAtk = wd.atk
+    local displaySpd = wd.spd
+    if mat then
+        displayAtk = math.floor(wd.atk * (1 + mat.atkMod))
+        displaySpd = wd.spd * (1 + mat.spdMod)
+    end
+    
     local statsChildren = {
-        CreateStatRow("⚔️ 攻击力", tostring(wd.atk)),
-        CreateStatRow("⚡ 攻速", string.format("%.1f", wd.spd)),
+        CreateStatRow("⚔️ 攻击力", tostring(displayAtk)),
+        CreateStatRow("⚡ 攻速", string.format("%.2f", displaySpd)),
         CreateStatRow("📏 范围", string.format("%.1f", wd.range)),
     }
     if wd.def > 0 then
@@ -151,6 +160,34 @@ function ResultState.BuildUI()
                         gap = 6,
                         children = statsChildren,
                     },
+                    -- 材质信息
+                    mat and UI.Panel {
+                        width = "100%",
+                        padding = 8,
+                        backgroundColor = { mat.color[1], mat.color[2], mat.color[3], 30 },
+                        borderRadius = 8,
+                        borderWidth = 1,
+                        borderColor = { mat.color[1], mat.color[2], mat.color[3], 120 },
+                        gap = 4,
+                        alignItems = "center",
+                        children = {
+                            UI.Label {
+                                text = "材质: " .. mat.name,
+                                fontSize = 14,
+                                fontColor = { mat.color[1], mat.color[2], mat.color[3], 255 },
+                            },
+                            UI.Label {
+                                text = mat.desc,
+                                fontSize = 12,
+                                fontColor = { 200, 205, 210, 220 },
+                            },
+                            mat.penalty and UI.Label {
+                                text = "代价: " .. mat.penalty,
+                                fontSize = 11,
+                                fontColor = { 240, 80, 80, 200 },
+                            } or nil,
+                        },
+                    } or nil,
                     -- 锻造评分（分项 + 总分）
                     UI.Panel {
                         width = "100%",

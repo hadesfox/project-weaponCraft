@@ -11,6 +11,7 @@ Config.Title = "锻造师"
 Config.States = {
     MENU = "menu",
     DRAW = "draw",
+    MATERIAL = "material",
     FORGE = "forge",
     RESULT = "result",
     TRIAL = "trial",
@@ -250,6 +251,94 @@ Config.Colors = {
     TextDark = { 30, 30, 35, 255 },       -- 焦黑（文字描边、雕刻阴影）
     Gold = { 160, 140, 90, 255 },         -- 旧金（金属装饰、低饱和氧化质感）
     Silver = { 120, 130, 140, 255 },      -- 钢灰（银色金属、铁器氧化）
+}
+
+-- ============================================================================
+-- 材质系统配置
+-- ============================================================================
+Config.Materials = {
+    {
+        id = "black_iron",
+        name = "黑铁",
+        color = { 60, 60, 80 },
+        atkMod = 0.20,       -- +20% 攻击
+        spdMod = -0.10,      -- -10% 攻速
+        penalty = nil,
+        effect = "heavy_blow", -- 重击：击退+50%
+        desc = "重击：击退距离+50%",
+    },
+    {
+        id = "mithril",
+        name = "秘银",
+        color = { 180, 220, 255 },
+        atkMod = -0.10,
+        spdMod = 0.25,
+        penalty = "hp_minus_10", -- -10% HP
+        effect = "agile",        -- 灵动：攻击时不减速
+        desc = "灵动：攻击时移速不减",
+    },
+    {
+        id = "obsidian",
+        name = "黑曜石",
+        color = { 30, 10, 50 },
+        atkMod = 0.40,
+        spdMod = 0,
+        penalty = "fragile",     -- 易损
+        effect = "shatter",      -- 碎裂：受击伤害+20%
+        desc = "碎裂：自身受伤+20%",
+    },
+    {
+        id = "blood_ore",
+        name = "血矿",
+        color = { 180, 30, 30 },
+        atkMod = -0.15,
+        spdMod = 0,
+        penalty = "hp_cost_start", -- 开局扣血
+        effect = "lifesteal",      -- 嗜血：伤害15%转HP
+        desc = "嗜血：伤害15%回血",
+    },
+    {
+        id = "radiant_meteor",
+        name = "陨星",
+        color = { 100, 255, 80 },
+        atkMod = -0.30,
+        spdMod = 0,
+        penalty = nil,
+        effect = "burn",           -- 灼烧：真实伤害 2%/s
+        desc = "灼烧：每秒2%真伤",
+    },
+    {
+        id = "inverse_alloy",
+        name = "逆鳞",
+        color = { 200, 160, 50 },
+        atkMod = -0.20,
+        spdMod = 0,
+        penalty = nil,
+        effect = "thorns",         -- 反震：格挡反弹100伤害
+        desc = "反震：格挡反伤100",
+    },
+    {
+        id = "spirit_wood",
+        name = "灵木",
+        color = { 80, 200, 120 },
+        atkMod = 0,
+        spdMod = 0,
+        penalty = "combo_fragile", -- 易断链
+        effect = "growth",         -- 成长：连击+5%伤害(上限50%)
+        desc = "成长：连击+5%伤害",
+    },
+}
+
+-- 材质弹幕配置
+Config.MaterialDanmaku = {
+    Duration = 5.0,          -- 弹幕持续秒数（超时自动随机选一个）
+    SpawnInterval = 0.035,   -- 生成间隔（极密集）
+    Speed = { 700, 1200 },   -- 飞行速度范围（极快）
+    BoxWidth = 85,           -- 材质框宽度
+    BoxHeight = 30,          -- 材质框高度
+    Lanes = 6,               -- 弹道数量（行数，增加一行）
+    LanePadding = 4,         -- 行间距
+    BoxColor = { 55, 58, 68 },  -- 统一方块颜色（不可辨认）
 }
 
 -- 品质定义

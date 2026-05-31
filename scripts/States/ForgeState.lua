@@ -20,10 +20,12 @@ local onComplete_ = nil
 -- 音效
 local hammerSound_  = nil
 local quenchSound_ = nil
+local grindSound_   = nil
 local audioScene_   = nil
 local audioNode_    = nil
 local hammerSource_ = nil  -- 锤击音源（预创建，复用）
 local quenchSource_ = nil  -- 淬火循环音源（预创建，复用）
+local grindSource_  = nil  -- 砥砺磨刀音源（预创建，复用）
 
 -- 锻造阶段
 local PHASE_HAMMER  = 1   -- 锤击
@@ -101,10 +103,17 @@ local RenderQuenchPhase
 local RenderGrindPhase
 
 
+-- 阶段切换回调（通知外部倒数系统）
+local onPhaseChange_ = nil
+
 --- 进入锻造状态
-function ForgeState.Enter(gameData, onComplete)
+--- @param gameData table 游戏共享数据
+--- @param onComplete function 锻造完成回调
+--- @param onPhaseChange function|nil 阶段切换回调(phaseStr) "quench"/"grind"
+function ForgeState.Enter(gameData, onComplete, onPhaseChange)
     gameData_    = gameData
     onComplete_  = onComplete
+    onPhaseChange_ = onPhaseChange
     currentPhase_ = PHASE_HAMMER
     phaseTimer_   = 0
     totalScore_   = 0
@@ -137,6 +146,17 @@ function ForgeState.Enter(gameData, onComplete)
     quenchSource_.gain = 0.0
     if quenchSound_ then
         quenchSource_:Play(quenchSound_)  -- 静音播放，触发解码管线
+    end
+
+    grindSound_ = cache:GetResource("Sound", "audio/sfx/forge_grind.ogg")
+    if grindSound_ then
+        grindSound_.looped = false
+    end
+    grindSource_ = audioNode_:CreateComponent("SoundSource")
+    grindSource_.soundType = SOUND_EFFECT
+    grindSource_.gain = 0.0
+    if grindSound_ then
+        grindSource_:Play(grindSound_)  -- 静音播放预热
     end
     
     -- 初始化锤击
@@ -561,6 +581,7 @@ OnForgeInput = function()
         if hammerWaitClick_ then
             currentPhase_ = PHASE_QUENCH
             InitQuenchPhase()
+            if onPhaseChange_ then onPhaseChange_("quench") end
             return
         end
         -- 锤击结果展示中忽略输入
@@ -598,6 +619,7 @@ OnForgeInput = function()
             grindWaitClick_ = false
             currentPhase_ = PHASE_GRIND
             InitGrindPhase()
+            if onPhaseChange_ then onPhaseChange_("grind") end
             return
         end
         if not quenchDone_ then
@@ -636,9 +658,13 @@ function ForgeState.OnKeyDown(key)
         if keyName then
             local expected = GRIND_KEYS[grindKeyIndex_]
             if keyName == expected then
-                -- 按对了
+                -- 按对了，播放磨刀音效
                 grindKeyIndex_ = grindKeyIndex_ + 1
                 grindFlash_ = 1.0
+                if grindSource_ and grindSound_ then
+                    grindSource_.gain = 0.7
+                    grindSource_:Play(grindSound_)
+                end
                 if grindKeyIndex_ > #GRIND_KEYS then
                     -- 完成一轮打磨
                     grindCount_ = grindCount_ + 1
