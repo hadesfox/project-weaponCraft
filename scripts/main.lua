@@ -14,6 +14,7 @@ local TrialState = require("States.TrialState")
 local MenuState = require("States.MenuState")
 local PhaseOverlay = require("PhaseOverlay")
 local KeyBindings = require("KeyBindings")
+local PauseMenu = require("PauseMenu")
 
 -- ============================================================================
 -- BGM 系统
@@ -159,7 +160,8 @@ local introNvgImage_ = nil        -- NanoVG 视频纹理句柄
 local introFadeAlpha_ = 0         -- 淡入淡出 alpha (0~1)
 local introPhase_ = "none"        -- "fadein" | "playing" | "fadeout" | "none"
 local introOnDone_ = nil          -- 完成后的回调
-local introSkipHintAlpha_ = 0     -- "按ESC跳过" 提示文字透明度
+local introSkipHintAlpha_ = 0     -- 跳过按钮透明度
+local introSkipBtnRect_ = nil     -- 跳过按钮点击区域 {x,y,w,h} 逻辑像素
 
 local INTRO_VIDEO_PATH = "video/开场动画.mp4"
 local INTRO_FADE_IN_TIME = 0.4
@@ -173,6 +175,7 @@ function Intro.Start(onDone)
     introTimer_ = 0
     introFadeAlpha_ = 0
     introSkipHintAlpha_ = 0
+    introSkipBtnRect_ = nil
     introNvgImage_ = nil
 
     -- 创建 VideoPlayer
@@ -310,22 +313,63 @@ function Intro.Render(vg)
         -- fadein 阶段仅显示黑屏（已在上面绘制）
     end
 
-    -- "按 ESC 跳过" 提示（右下角）
+    -- "跳过 >>" 按钮（右上角）
     if introSkipHintAlpha_ > 0.01 then
         local fontId = NVG.GetFont()
         if fontId ~= -1 then
+            local btnText = "跳过 >>"
+            local btnFontSize = 14
+            local btnPadH = 14
+            local btnPadV = 8
+            local btnX = lw - 20   -- 右侧对齐（按钮右边缘）
+            local btnY = 20        -- 顶部距离
+
             nvgFontFaceId(vg, fontId)
-            nvgFontSize(vg, 14)
-            nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_BOTTOM)
-            local a = math.floor(introSkipHintAlpha_ * 160)
-            nvgFillColor(vg, nvgRGBA(200, 200, 200, a))
-            nvgText(vg, lw - 24, lh - 20, "按 ESC 跳过", nil)
+            nvgFontSize(vg, btnFontSize)
+            nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
+
+            -- 测量文本宽度
+            local _, bounds = nvgTextBounds(vg, 0, 0, btnText)
+            local textW = (bounds and bounds[3] and bounds[1]) and (bounds[3] - bounds[1]) or (btnFontSize * 4)
+            local textH = btnFontSize
+
+            local btnW = textW + btnPadH * 2
+            local btnH = textH + btnPadV * 2
+            local bx = btnX - btnW
+            local by = btnY
+
+            -- 保存按钮区域供点击检测
+            introSkipBtnRect_ = { x = bx, y = by, w = btnW, h = btnH }
+
+            local a = math.floor(introSkipHintAlpha_ * 200)
+
+            -- 按钮背景
+            nvgBeginPath(vg)
+            nvgRoundedRect(vg, bx, by, btnW, btnH, 6)
+            nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(a * 0.5)))
+            nvgFill(vg)
+            nvgStrokeColor(vg, nvgRGBA(200, 200, 200, a))
+            nvgStrokeWidth(vg, 1)
+            nvgStroke(vg)
+
+            -- 按钮文字
+            nvgFillColor(vg, nvgRGBA(220, 220, 220, a))
+            nvgText(vg, bx + btnPadH, by + btnPadV, btnText, nil)
         end
     end
 end
 
 function Intro.IsActive()
     return introActive_
+end
+
+--- 检测点击/触摸是否命中跳过按钮（逻辑像素坐标）
+function Intro.HitSkipButton(lx, ly)
+    if not introActive_ then return false end
+    if introSkipHintAlpha_ < 0.1 then return false end
+    local r = introSkipBtnRect_
+    if not r then return false end
+    return lx >= r.x and lx <= r.x + r.w and ly >= r.y and ly <= r.y + r.h
 end
 
 function Intro.OnKeyDown(key)
@@ -647,6 +691,9 @@ function HandleUpdate(eventType, eventData)
     -- 过渡中不更新游戏状态（防止输入干扰）
     if PhaseOverlay.IsTransitioning() then return end
     
+    -- 暂停菜单打开时不更新游戏逻辑
+    if PauseMenu.IsVisible() then return end
+
     local mod = GetActiveModule()
     if mod then mod.Update(dt) end
 end
@@ -661,6 +708,45 @@ function HandleKeyDown(eventType, eventData)
         return
     end
     if PhaseOverlay.IsTransitioning() then return end
+
+    -- ESC 暂停菜单拦截（非主菜单状态）
+    if key == KEY_ESCAPE and currentState_ ~= Config.States.MENU then
+        if PauseMenu.IsVisible() then
+            -- 已在暂停菜单 → 关闭并恢复游戏 UI
+            PauseMenu.Hide()
+            UI.SetRoot(uiRoot_)
+        else
+            -- 打开暂停菜单
+            local pauseOpts = {
+                onReturnMenu = function()
+                    -- 离开当前状态，重置并回到主界面
+                    BGM.StopAll()
+                    LeaveState(currentState_)
+                    ResetGameData()
+                    currentState_ = Config.States.MENU
+                    MenuState.Enter(function()
+                        Intro.Start(function()
+                            SwitchState(Config.States.DRAW)
+                        end)
+                    end)
+                    uiRoot_ = MenuState.BuildUI()
+                    UI.SetRoot(uiRoot_)
+                end,
+            }
+            -- 试炼场额外传入武器信息
+            if currentState_ == Config.States.TRIAL then
+                pauseOpts.weaponData = gameData_.weaponData
+                pauseOpts.material = gameData_.material
+                pauseOpts.quality = gameData_.quality
+            end
+            PauseMenu.Show(pauseOpts)
+        end
+        return
+    end
+
+    -- 暂停中不分发按键给游戏状态
+    if PauseMenu.IsVisible() then return end
+
     local mod = GetActiveModule()
     if mod then mod.OnKeyDown(key) end
 end
@@ -668,14 +754,25 @@ end
 function HandleKeyUp(eventType, eventData)
     if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
+    if PauseMenu.IsVisible() then return end
     local key = eventData["Key"]:GetInt()
     local mod = GetActiveModule()
     if mod and mod.OnKeyUp then mod.OnKeyUp(key) end
 end
 
 function HandleMouseDown(eventType, eventData)
-    if Intro.IsActive() then return end
+    if Intro.IsActive() then
+        -- 检测跳过按钮点击
+        local dpr = graphics:GetDPR()
+        local mx = input:GetMousePosition().x / dpr
+        local my = input:GetMousePosition().y / dpr
+        if Intro.HitSkipButton(mx, my) then
+            Intro.Skip()
+        end
+        return
+    end
     if PhaseOverlay.IsTransitioning() then return end
+    if PauseMenu.IsVisible() then return end
     local button = eventData["Button"]:GetInt()
     local mod = GetActiveModule()
     if mod then mod.OnMouseDown(button) end
@@ -684,6 +781,7 @@ end
 function HandleMouseUp(eventType, eventData)
     if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
+    if PauseMenu.IsVisible() then return end
     local button = eventData["Button"]:GetInt()
     local mod = GetActiveModule()
     if mod then mod.OnMouseUp(button) end
@@ -692,6 +790,7 @@ end
 function HandleMouseMove(eventType, eventData)
     if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
+    if PauseMenu.IsVisible() then return end
     local mod = GetActiveModule()
     if mod then mod.OnMouseMove() end
 end
@@ -703,6 +802,7 @@ function HandleTouchBegin(eventType, eventData)
         return
     end
     if PhaseOverlay.IsTransitioning() then return end
+    if PauseMenu.IsVisible() then return end
     local x = eventData["X"]:GetInt()
     local y = eventData["Y"]:GetInt()
     local mod = GetActiveModule()
@@ -712,6 +812,7 @@ end
 function HandleTouchMove(eventType, eventData)
     if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
+    if PauseMenu.IsVisible() then return end
     local x = eventData["X"]:GetInt()
     local y = eventData["Y"]:GetInt()
     local mod = GetActiveModule()
@@ -721,6 +822,7 @@ end
 function HandleTouchEnd(eventType, eventData)
     if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
+    if PauseMenu.IsVisible() then return end
     local x = eventData["X"]:GetInt()
     local y = eventData["Y"]:GetInt()
     local mod = GetActiveModule()

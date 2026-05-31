@@ -6,6 +6,7 @@
 -- ============================================================================
 
 local UI = require("urhox-libs/UI")
+local Video = require("urhox-libs/Video")
 local Config = require("Config")
 local NVG = require("NVG")
 local KeyBindings = require("KeyBindings")
@@ -161,6 +162,12 @@ local playerInputId_ = ""          -- 玩家输入的ID
 local leaderboardData_ = {}        -- 排行榜数据
 local myRank_ = nil                -- 我的排名
 
+-- 结算视频状态
+local endVideoPlaying_ = false     -- 是否正在播放结算视频
+local endVideoPlayer_ = nil        -- VideoPlayer 引用
+local WIN_VIDEO_PATH  = "video/1780205172944-167941.mp4"
+local LOSE_VIDEO_PATH = "video/1780204189075-776175.mp4"
+
 -- 内部函数前向声明
 local PrepareWeaponStrokes
 local SetupTransformSystem
@@ -195,6 +202,7 @@ local CheckWeaponClash
 local GetPlayerWeaponCollider
 local UpdateWeaponClash
 
+local PlayEndVideo
 local ShowEndScreen
 local SubmitScore
 local FetchLeaderboard
@@ -529,7 +537,14 @@ function TrialState.Leave()
     dummyAttacks_ = {}
     leaderboardData_ = {}
 
-    -- ④ 重置状态标志
+    -- ④ 释放视频播放器
+    if endVideoPlayer_ then
+        endVideoPlayer_:Destroy()
+        endVideoPlayer_ = nil
+    end
+    endVideoPlaying_ = false
+
+    -- ⑤ 重置状态标志
     attacking_ = false
     trialEnded_ = false
     showEndScreen_ = false
@@ -824,7 +839,7 @@ function TrialState.Update(dt)
         trialEndReason_ = "timeout"
         attacking_ = false
         currentAttack_ = nil
-        ShowEndScreen()
+        PlayEndVideo()
         return
     end
     
@@ -834,7 +849,7 @@ function TrialState.Update(dt)
         trialEndReason_ = "defeated"
         attacking_ = false
         currentAttack_ = nil
-        ShowEndScreen()
+        PlayEndVideo()
         return
     end
     
@@ -880,7 +895,7 @@ function TrialState.Update(dt)
         trialEndReason_ = "kill"
         attacking_ = false
         currentAttack_ = nil
-        ShowEndScreen()
+        PlayEndVideo()
         return
     end
     
@@ -1384,8 +1399,72 @@ UpdateHUD = function()
 end
 
 -- ============================================================================
--- 结算画面
+-- 结算视频 + 结算画面
 -- ============================================================================
+
+--- 播放结算视频（胜利/失败），播放完毕后进入结算画面
+PlayEndVideo = function()
+    -- 如果视频不支持则直接跳到结算画面
+    if not Video.isSupported then
+        ShowEndScreen()
+        return
+    end
+
+    endVideoPlaying_ = true
+
+    local videoPath = trialEndReason_ == "kill" and WIN_VIDEO_PATH or LOSE_VIDEO_PATH
+
+    local function onVideoFinished()
+        if not endVideoPlaying_ then return end
+        endVideoPlaying_ = false
+        if endVideoPlayer_ then
+            endVideoPlayer_:Destroy()
+            endVideoPlayer_ = nil
+        end
+        ShowEndScreen()
+    end
+
+    -- 全屏视频 + 跳过按钮
+    endVideoPlayer_ = Video.VideoPlayer {
+        id = "endVideo",
+        src = videoPath,
+        width = "100%",
+        height = "100%",
+        autoPlay = true,
+        loop = false,
+        objectFit = "cover",
+        backgroundColor = { 0, 0, 0, 255 },
+        onEnded = function(self)
+            onVideoFinished()
+        end,
+        children = {
+            -- 右上角跳过按钮
+            UI.Panel {
+                position = "absolute",
+                top = 20, right = 20,
+                children = {
+                    UI.Button {
+                        text = "跳过 >>",
+                        size = "small",
+                        variant = "outline",
+                        onClick = function()
+                            onVideoFinished()
+                        end,
+                    },
+                },
+            },
+        },
+    }
+
+    local videoRoot = UI.Panel {
+        width = "100%", height = "100%",
+        backgroundColor = { 0, 0, 0, 255 },
+        children = { endVideoPlayer_ },
+    }
+
+    uiRoot_ = videoRoot
+    UI.SetRoot(uiRoot_)
+end
 
 --- 显示结算画面（替换 UI 为结算面板）
 --- 左侧：击败信息 + 玩家输入提交
