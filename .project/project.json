@@ -19,13 +19,13 @@
     "miniapp_id": "tapmcfbvqcb8yxzg1h"
   },
   "assets": {
-    "icon": "./assets/image/icon_anvil.png",
+    "icon": "./game_material/icon_anvil.png",
     "screenshots": [
       "./game_material/SCREENSHOT_2026-05-31T03-30-25_01.png",
       "./game_material/SCREENSHOT_2026-05-31T03-30-25_02.png",
       "./game_material/SCREENSHOT_2026-05-31T03-30-25_03.png"
     ],
-    "promotional_image": "./assets/image/QQ20260531-122733.png",
+    "promotional_image": "./game_material/QQ20260531-122733.png",
     "icon_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_jkr1/icon_anvil.png",
     "screenshot_urls": [
       "https://tapcode-sce.spark.xd.com/assets/game_material/锻造师/SCREENSHOT_2026-05-31T03-30-25_01.png",

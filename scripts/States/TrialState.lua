@@ -516,6 +516,8 @@ function TrialState.Leave()
     playerRunFrames_ = {}
     -- 释放史莱姆
     Slime.Shutdown()
+    -- 释放渲染器图片（背景/dummy）
+    Renderer.ReleaseImages(NVG.Get())
 end
 
 --- 生成平台（多层复杂布局）
