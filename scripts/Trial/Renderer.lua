@@ -8,6 +8,11 @@ local Slime = require("Trial.Slime")
 
 local Renderer = {}
 
+-- 锻造师贴图（木桩替代）
+local DUMMY_IMAGE_PATH = "image/主角_锻造师_20260530003547.png"
+local dummyImage_ = nil
+local dummyImageAspect_ = 1.0  -- 图片宽高比 (w/h)
+
 --- 计算突刺攻击长度（纯数学函数，从TrialState提取）
 --- @param progress number 攻击进度 0~1
 --- @param attackRange number 攻击范围
@@ -142,46 +147,50 @@ function Renderer.RenderTargets(vg, S)
     end
 end
 
---- 渲染木桩
+--- 渲染木桩（锻造师贴图）
 --- @param vg userdata
 --- @param S table 共享状态表
 function Renderer.RenderDummy(vg, S)
     if not S.dummy then return end
 
+    -- 懒加载贴图并获取宽高比
+    if not dummyImage_ then
+        dummyImage_ = nvgCreateImage(vg, DUMMY_IMAGE_PATH, 0)
+        if dummyImage_ and dummyImage_ ~= 0 then
+            local imgW, imgH = nvgImageSize(vg, dummyImage_)
+            if imgH and imgH > 0 then
+                dummyImageAspect_ = imgW / imgH
+            end
+        end
+    end
+
     local dx = S.dummy.x
     local dy = S.dummy.y
-    local dw = S.dummy.width
     local dh = S.dummy.height
+    -- 以高度为基准，按图片真实宽高比计算渲染宽度
+    local dw = dh * dummyImageAspect_
 
     local shakeX = 0
     if S.dummy.hitAnim > 0 then
         shakeX = math.sin(S.dummy.hitAnim * 20) * 4 * S.dummy.hitAnim * S.dummy.hitDir
     end
 
-    -- 木桩主体
-    nvgBeginPath(vg)
-    nvgRoundedRect(vg, dx - dw / 2 + shakeX, dy - dh, dw, dh, 4)
-    nvgFillColor(vg, nvgRGBA(50, 50, 55, 240))
-    nvgFill(vg)
-
-    -- 木纹
-    nvgStrokeColor(vg, nvgRGBA(150, 200, 255, 150))
-    nvgStrokeWidth(vg, 1)
-    for i = 1, 3 do
-        local ly = dy - dh * i / 4
+    -- 用锻造师贴图渲染
+    if dummyImage_ and dummyImage_ ~= 0 then
+        local imgX = dx - dw / 2 + shakeX
+        local imgY = dy - dh
+        local imgPat = nvgImagePattern(vg, imgX, imgY, dw, dh, 0, dummyImage_, 1.0)
         nvgBeginPath(vg)
-        nvgMoveTo(vg, dx - dw / 2 + 3 + shakeX, ly)
-        nvgLineTo(vg, dx + dw / 2 - 3 + shakeX, ly)
-        nvgStroke(vg)
+        nvgRect(vg, imgX, imgY, dw, dh)
+        nvgFillPaint(vg, imgPat)
+        nvgFill(vg)
+    else
+        -- 贴图加载失败时的 fallback：简单矩形
+        nvgBeginPath(vg)
+        nvgRoundedRect(vg, dx - dw / 2 + shakeX, dy - dh, dw, dh, 4)
+        nvgFillColor(vg, nvgRGBA(50, 50, 55, 240))
+        nvgFill(vg)
     end
-
-    -- 顶部横梁
-    local armW = 36 * S.physScale
-    local armH = 8 * S.physScale
-    nvgBeginPath(vg)
-    nvgRoundedRect(vg, dx - armW / 2 + shakeX, dy - dh - armH / 2, armW, armH, 3)
-    nvgFillColor(vg, nvgRGBA(50, 50, 55, 240))
-    nvgFill(vg)
 
     -- 受击闪光
     if S.dummy.hitAnim > 0.5 then
@@ -190,22 +199,6 @@ function Renderer.RenderDummy(vg, S)
         nvgCircle(vg, dx + shakeX, dy - dh / 2, 20 * S.physScale)
         nvgFillColor(vg, nvgRGBA(255, 255, 200, alpha))
         nvgFill(vg)
-    end
-
-    -- 底座
-    nvgBeginPath(vg)
-    nvgRoundedRect(vg, dx - dw * 0.8 + shakeX, dy - 6 * S.physScale, dw * 1.6, 6 * S.physScale, 2)
-    nvgFillColor(vg, nvgRGBA(20, 22, 28, 240))
-    nvgFill(vg)
-
-    -- 标签
-    local fontId = NVG.GetFont()
-    if fontId ~= -1 then
-        nvgFontFaceId(vg, fontId)
-        nvgFontSize(vg, 10 * S.physScale)
-        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
-        nvgFillColor(vg, nvgRGBA(120, 130, 140, 200))
-        nvgText(vg, dx + shakeX, dy - dh - 10 * S.physScale, "木桩", nil)
     end
 end
 

@@ -238,6 +238,8 @@ end
 --- 初始化砥砺阶段
 ---@diagnostic disable-next-line: redefined-local
 InitGrindPhase = function()
+    -- 刷新按键显示名（Init 已完成，此时 bindings_ 有值）
+    GRIND_KEYS        = KeyBindings.GetGrindKeyNames()
     grindCount_       = 0
     grindKeyIndex_    = 1
     grindTimer_       = 0

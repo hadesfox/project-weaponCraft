@@ -58,6 +58,9 @@ local SECRET_ZONE = { rx = 0.0, ry = 0.35, rw = 0.12, rh = 0.45 }
 local showCharPanel_ = false
 local charPanelAnim_ = 0    -- 面板展开动画 (0→1)
 
+-- 已点击开始游戏（隐藏所有菜单内容，只渲染纯黑）
+local gameStarted_ = false
+
 -- 设置面板状态
 local showSettings_ = false
 local settingsAnim_ = 0     -- 面板展开动画 (0→1)
@@ -114,6 +117,7 @@ function MenuState.Enter(onStart)
     pressIndex_ = 0
     showCharPanel_ = false
     charPanelAnim_ = 0
+    gameStarted_ = false
     showSettings_ = false
     settingsAnim_ = 0
     settingsScroll_ = 0
@@ -202,7 +206,7 @@ function MenuState.OnKeyDown(key)
         end
     elseif key == KEY_RETURN or key == KEY_SPACE then
         if not showCharPanel_ then
-            if onStartGame_ then onStartGame_() end
+            if onStartGame_ then gameStarted_ = true; onStartGame_() end
         end
     end
 end
@@ -261,7 +265,7 @@ function MenuState.OnMouseUp(button)
             -- 执行按钮动作
             local btnId = buttons_[idx].id
             if btnId == "start" then
-                if onStartGame_ then onStartGame_() end
+                if onStartGame_ then gameStarted_ = true; onStartGame_() end
             elseif btnId == "character" then
                 showCharPanel_ = true
             elseif btnId == "quit" then
@@ -315,7 +319,7 @@ function MenuState.OnTouchBegin(x, y)
         pressAnim_[idx] = 1.0
         local btnId = buttons_[idx].id
         if btnId == "start" then
-            if onStartGame_ then onStartGame_() end
+            if onStartGame_ then gameStarted_ = true; onStartGame_() end
         elseif btnId == "character" then
             showCharPanel_ = true
         end
@@ -369,6 +373,17 @@ function MenuState.Render(vg)
 
     nvgBeginFrame(vg, w, h, 1.0)
     nvgScale(vg, dpr, dpr)
+
+    -- 点击开始后立即切为纯黑，避免过渡期间闪现菜单背景
+    if gameStarted_ then
+        nvgBeginPath(vg)
+        nvgRect(vg, 0, 0, screenW_, screenH_)
+        nvgFillColor(vg, nvgRGBA(0, 0, 0, 255))
+        nvgFill(vg)
+        nvgResetTransform(vg)
+        nvgEndFrame(vg)
+        return
+    end
 
     -- 背景图
     RenderBackground(vg)
@@ -582,10 +597,9 @@ end
 
 --- 设置面板内的点击处理
 function MenuState.HandleSettingsClick(mx, my)
-    -- 如果正在重绑定，点击任何地方取消
+    -- 如果正在重绑定，取消当前重绑定但继续处理本次点击（可能点了新行）
     if rebindingAction_ then
         rebindingAction_ = nil
-        return
     end
 
     -- 全屏面板区域
@@ -607,20 +621,24 @@ function MenuState.HandleSettingsClick(mx, my)
     end
 
     -- 按键绑定行点击 → 进入重绑定
+    -- 使用与 RenderSettingsPanel 完全一致的累加逻辑
     local actions = KeyBindings.Actions
-    local headerH = 58
     local rowH = 36
-    local contentY = py + headerH - settingsScroll_
+    local contentTop = py + 52
+    local curY = contentTop + 6 - settingsScroll_
+    local lastCategory = ""
 
     for i = 1, #actions do
         local action = actions[i]
-        local rowY = contentY + (i - 1) * rowH
 
-        -- 分类标题占一行额外空间
-        if i > 1 and actions[i].category ~= actions[i - 1].category then
-            contentY = contentY + 38
-            rowY = contentY + (i - 1) * rowH
+        -- 分类标题（与渲染逻辑一致）
+        if action.category ~= lastCategory then
+            lastCategory = action.category
+            if i > 1 then curY = curY + 12 end
+            curY = curY + 26
         end
+
+        local rowY = curY
 
         -- 按键区域在行右侧
         local keyBoxX = px + panelW * 0.50
@@ -631,6 +649,8 @@ function MenuState.HandleSettingsClick(mx, my)
             rebindFlash_ = 0
             return
         end
+
+        curY = curY + rowH
     end
 end
 
