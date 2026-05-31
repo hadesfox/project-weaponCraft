@@ -631,56 +631,39 @@ end
 --- @param S table 共享状态表
 function Renderer.RenderDummyWeapon(vg, S)
     if not S.dummyWeapon or not S.dummy then return end
+    -- 仅攻击时显示武器（平时隐藏，无法格挡）
+    if not S.dummyAttacking then return end
 
     local dw = S.dummyWeapon
-    local len = dw.length * S.physScale
 
-    -- 武器柄
-    nvgBeginPath(vg)
-    nvgMoveTo(vg, dw.rootX, dw.rootY)
-    local handleX = dw.rootX + math.cos(dw.angle) * len * 0.3
-    local handleY = dw.rootY + math.sin(dw.angle) * len * 0.3
-    nvgLineTo(vg, handleX, handleY)
-    nvgStrokeColor(vg, nvgRGBA(120, 90, 60, 240))
-    nvgStrokeWidth(vg, 5 * S.physScale)
-    nvgLineCap(vg, NVG_ROUND)
-    nvgStroke(vg)
+    -- 使用与玩家相同的绘制武器形状和颜色（略暗，表示敌方）
+    local wc = S.gameData and S.gameData.weaponData and S.gameData.weaponData.typeInfo.color or {200, 200, 200}
+    -- 木桩武器颜色偏暗红，区分于玩家
+    local dummyColor = { math.min(255, wc[1] + 40), math.max(0, wc[2] - 60), math.max(0, wc[3] - 60) }
 
-    -- 武器刃
-    nvgBeginPath(vg)
-    nvgMoveTo(vg, handleX, handleY)
-    nvgLineTo(vg, dw.tipX, dw.tipY)
-    nvgStrokeColor(vg, nvgRGBA(180, 190, 200, 240))
-    nvgStrokeWidth(vg, 4 * S.physScale)
-    nvgLineCap(vg, NVG_ROUND)
-    nvgStroke(vg)
+    -- 计算武器中心点和角度
+    local midX = (dw.rootX + dw.tipX) / 2
+    local midY = (dw.rootY + dw.tipY) / 2
+    local weaponAngle = dw.angle + math.pi / 2
+    local flipX = not S.dummyFacingRight
 
-    -- 刃边高光
-    nvgBeginPath(vg)
-    nvgMoveTo(vg, handleX, handleY)
-    nvgLineTo(vg, dw.tipX, dw.tipY)
-    nvgStrokeColor(vg, nvgRGBA(220, 230, 240, 100))
-    nvgStrokeWidth(vg, 2 * S.physScale)
-    nvgStroke(vg)
+    -- 使用 RenderWeaponShape 渲染与玩家相同的武器形状
+    Renderer.RenderWeaponShape(vg, S, midX, midY, weaponAngle, dummyColor, 1.0 * S.physScale, flipX)
 
-    -- 护手
-    local guardLen = 6 * S.physScale
-    local perpAngle = dw.angle + math.pi / 2
-    nvgBeginPath(vg)
-    nvgMoveTo(vg, handleX + math.cos(perpAngle) * guardLen, handleY + math.sin(perpAngle) * guardLen)
-    nvgLineTo(vg, handleX - math.cos(perpAngle) * guardLen, handleY - math.sin(perpAngle) * guardLen)
-    nvgStrokeColor(vg, nvgRGBA(160, 140, 90, 220))
-    nvgStrokeWidth(vg, 3 * S.physScale)
-    nvgStroke(vg)
-
-    -- 碰撞体积可视化（调试）
-    nvgBeginPath(vg)
-    nvgMoveTo(vg, dw.rootX, dw.rootY)
-    nvgLineTo(vg, dw.tipX, dw.tipY)
-    nvgStrokeColor(vg, nvgRGBA(255, 100, 100, 30))
-    nvgStrokeWidth(vg, dw.width * S.physScale)
-    nvgLineCap(vg, NVG_ROUND)
-    nvgStroke(vg)
+    -- 挥动轨迹特效（仅挥砍时）
+    if S.dummyCurrentAttack and not S.dummyCurrentAttack.isThrust then
+        local progress = S.dummyAttackProgress or 0
+        local trailAlpha = math.floor((1 - progress) * 30)
+        if trailAlpha > 0 then
+            nvgBeginPath(vg)
+            nvgMoveTo(vg, dw.rootX, dw.rootY)
+            nvgLineTo(vg, dw.tipX, dw.tipY)
+            nvgStrokeColor(vg, nvgRGBA(dummyColor[1], dummyColor[2], dummyColor[3], trailAlpha))
+            nvgStrokeWidth(vg, 6 * S.physScale)
+            nvgLineCap(vg, NVG_ROUND)
+            nvgStroke(vg)
+        end
+    end
 end
 
 --- 渲染被弹开的武器（格挡后武器飞出动画）

@@ -8,6 +8,14 @@ local Config = require("Config")
 
 local ResultState = {}
 
+-- 代价 ID → 可读文字
+local PENALTY_NAMES = {
+    hp_minus_10   = "最大生命-10%",
+    fragile       = "自身易损，受伤+20%",
+    hp_cost_start = "开局扣除部分生命",
+    combo_fragile = "连击易断",
+}
+
 local gameData_ = nil
 local onComplete_ = nil
 
@@ -182,7 +190,7 @@ function ResultState.BuildUI()
                                 fontColor = { 200, 205, 210, 220 },
                             },
                             mat.penalty and UI.Label {
-                                text = "代价: " .. mat.penalty,
+                                text = "代价: " .. (PENALTY_NAMES[mat.penalty] or mat.penalty),
                                 fontSize = 11,
                                 fontColor = { 240, 80, 80, 200 },
                             } or nil,

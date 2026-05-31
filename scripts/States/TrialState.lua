@@ -1547,18 +1547,18 @@ CheckDummyAttackHitPlayer = function()
         player_.vy = -kb * 2.5
         player_.onGround = false
 
-        -- 伤害数字特效
+        -- 伤害数字特效（右侧偏移）
         hitEffects_[#hitEffects_ + 1] = {
-            x = pcx,
-            y = pcy - 20,
+            x = pcx + 25 * physScale_,
+            y = pcy - 15,
             text = "-" .. dmg,
             timer = Config.Combat.DamageNumberDuration,
             color = { 255, 80, 80 },
         }
-        -- 招式名称特效
+        -- 招式名称特效（左侧偏移）
         hitEffects_[#hitEffects_ + 1] = {
-            x = pcx,
-            y = pcy - 10,
+            x = pcx - 25 * physScale_,
+            y = pcy - 15,
             text = atk.name .. "!",
             timer = 1.0,
             color = { 255, 100, 80 },
@@ -1731,6 +1731,8 @@ end
 --- 检测玩家武器与木桩武器的碰撞
 CheckWeaponClash = function(progress)
     if not dummyWeapon_ or not dummy_ then return end
+    -- 木桩未攻击时武器隐藏，无法格挡
+    if not dummyAttacking_ then return end
     if weaponClashCooldown_ > 0 then return end
     
     local playerWeapon = GetPlayerWeaponCollider(progress)

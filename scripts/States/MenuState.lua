@@ -588,23 +588,18 @@ function MenuState.HandleSettingsClick(mx, my)
         return
     end
 
-    -- 计算面板区域
-    local panelW = math.min(screenW_ * 0.85, 480)
-    local panelH = math.min(screenH_ * 0.80, 420)
-    local px = (screenW_ - panelW) / 2
-    local py = (screenH_ - panelH) / 2
-
-    -- 点击面板外部 → 关闭
-    if mx < px or mx > px + panelW or my < py or my > py + panelH then
-        showSettings_ = false
-        return
-    end
+    -- 全屏面板区域
+    local margin = 12
+    local panelW = screenW_ - margin * 2
+    local panelH = screenH_ - margin * 2
+    local px = margin
+    local py = margin
 
     -- "恢复默认"按钮区域（面板底部）
-    local resetBtnW = 100
-    local resetBtnH = 28
+    local resetBtnW = 120
+    local resetBtnH = 32
     local resetBtnX = px + panelW / 2 - resetBtnW / 2
-    local resetBtnY = py + panelH - 45
+    local resetBtnY = py + panelH - 50
     if mx >= resetBtnX and mx <= resetBtnX + resetBtnW and
        my >= resetBtnY and my <= resetBtnY + resetBtnH then
         KeyBindings.ResetToDefault()
@@ -613,8 +608,8 @@ function MenuState.HandleSettingsClick(mx, my)
 
     -- 按键绑定行点击 → 进入重绑定
     local actions = KeyBindings.Actions
-    local headerH = 50
-    local rowH = 32
+    local headerH = 58
+    local rowH = 36
     local contentY = py + headerH - settingsScroll_
 
     for i = 1, #actions do
@@ -623,13 +618,13 @@ function MenuState.HandleSettingsClick(mx, my)
 
         -- 分类标题占一行额外空间
         if i > 1 and actions[i].category ~= actions[i - 1].category then
-            contentY = contentY + 20
+            contentY = contentY + 38
             rowY = contentY + (i - 1) * rowH
         end
 
         -- 按键区域在行右侧
-        local keyBoxX = px + panelW * 0.55
-        local keyBoxW = panelW * 0.35
+        local keyBoxX = px + panelW * 0.50
+        local keyBoxW = panelW * 0.42
         if mx >= keyBoxX and mx <= keyBoxX + keyBoxW and
            my >= rowY and my <= rowY + rowH then
             rebindingAction_ = action.id
@@ -644,17 +639,18 @@ RenderSettingsPanel = function(vg)
     local alpha = math.floor(settingsAnim_ * 255)
     local panelScale = 0.9 + settingsAnim_ * 0.1
 
-    -- 半透明遮罩
+    -- 全屏遮罩
     nvgBeginPath(vg)
     nvgRect(vg, 0, 0, screenW_, screenH_)
-    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(settingsAnim_ * 200)))
+    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(settingsAnim_ * 220)))
     nvgFill(vg)
 
-    -- 面板尺寸
-    local panelW = math.min(screenW_ * 0.85, 480)
-    local panelH = math.min(screenH_ * 0.80, 420)
-    local px = (screenW_ - panelW) / 2
-    local py = (screenH_ - panelH) / 2
+    -- 全屏面板尺寸
+    local margin = 12
+    local panelW = screenW_ - margin * 2
+    local panelH = screenH_ - margin * 2
+    local px = margin
+    local py = margin
 
     nvgSave(vg)
     nvgTranslate(vg, screenW_ / 2, screenH_ / 2)
@@ -663,8 +659,8 @@ RenderSettingsPanel = function(vg)
 
     -- 面板背景
     nvgBeginPath(vg)
-    nvgRoundedRect(vg, px, py, panelW, panelH, 14)
-    nvgFillColor(vg, nvgRGBA(25, 27, 35, alpha))
+    nvgRoundedRect(vg, px, py, panelW, panelH, 10)
+    nvgFillColor(vg, nvgRGBA(20, 22, 30, alpha))
     nvgFill(vg)
     nvgStrokeColor(vg, nvgRGBA(160, 140, 90, math.floor(alpha * 0.6)))
     nvgStrokeWidth(vg, 1.5)
@@ -679,27 +675,27 @@ RenderSettingsPanel = function(vg)
 
     -- 标题
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
-    nvgFontSize(vg, 20)
+    nvgFontSize(vg, 22)
     nvgFillColor(vg, nvgRGBA(160, 140, 90, alpha))
-    nvgText(vg, screenW_ / 2, py + 14, "按键设置", nil)
+    nvgText(vg, screenW_ / 2, py + 16, "按键设置", nil)
 
     -- 分割线
     nvgBeginPath(vg)
-    nvgMoveTo(vg, px + 20, py + 42)
-    nvgLineTo(vg, px + panelW - 20, py + 42)
+    nvgMoveTo(vg, px + 20, py + 46)
+    nvgLineTo(vg, px + panelW - 20, py + 46)
     nvgStrokeColor(vg, nvgRGBA(80, 80, 90, math.floor(alpha * 0.5)))
     nvgStrokeWidth(vg, 1)
     nvgStroke(vg)
 
     -- 裁剪区域（内容区）
-    local contentTop = py + 48
-    local contentBottom = py + panelH - 55
+    local contentTop = py + 52
+    local contentBottom = py + panelH - 60
     nvgScissor(vg, px, contentTop, panelW, contentBottom - contentTop)
 
     -- 绘制操作列表
     local actions = KeyBindings.Actions
-    local rowH = 32
-    local curY = contentTop + 4 - settingsScroll_
+    local rowH = 36
+    local curY = contentTop + 6 - settingsScroll_
     local lastCategory = ""
 
     for i = 1, #actions do
@@ -709,25 +705,25 @@ RenderSettingsPanel = function(vg)
         if action.category ~= lastCategory then
             lastCategory = action.category
             -- 分类间隔
-            if i > 1 then curY = curY + 8 end
-            nvgFontSize(vg, 13)
+            if i > 1 then curY = curY + 12 end
+            nvgFontSize(vg, 15)
             nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
             nvgFillColor(vg, nvgRGBA(100, 180, 255, math.floor(alpha * 0.8)))
-            nvgText(vg, px + 20, curY, "【" .. action.category .. "】", nil)
-            curY = curY + 22
+            nvgText(vg, px + 24, curY, "【" .. action.category .. "】", nil)
+            curY = curY + 26
         end
 
         local rowY = curY
 
         -- 操作名
-        nvgFontSize(vg, 14)
+        nvgFontSize(vg, 16)
         nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
         nvgFillColor(vg, nvgRGBA(200, 205, 210, alpha))
         nvgText(vg, px + 30, rowY + rowH / 2, action.name, nil)
 
         -- 按键框
-        local keyBoxX = px + panelW * 0.55
-        local keyBoxW = panelW * 0.35
+        local keyBoxX = px + panelW * 0.50
+        local keyBoxW = panelW * 0.42
         local keyBoxH = rowH - 6
         local keyBoxY = rowY + 3
 
@@ -754,11 +750,11 @@ RenderSettingsPanel = function(vg)
         -- 按键文字
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         if isRebinding then
-            nvgFontSize(vg, 12)
+            nvgFontSize(vg, 14)
             nvgFillColor(vg, nvgRGBA(255, 200, 60, alpha))
             nvgText(vg, keyBoxX + keyBoxW / 2, keyBoxY + keyBoxH / 2, "请按下新按键...", nil)
         else
-            nvgFontSize(vg, 13)
+            nvgFontSize(vg, 15)
             nvgFillColor(vg, nvgRGBA(180, 185, 195, alpha))
             local displayText = KeyBindings.GetDisplayText(action.id)
             nvgText(vg, keyBoxX + keyBoxW / 2, keyBoxY + keyBoxH / 2, displayText, nil)
@@ -770,26 +766,26 @@ RenderSettingsPanel = function(vg)
     nvgResetScissor(vg)
 
     -- "恢复默认"按钮
-    local resetBtnW = 100
-    local resetBtnH = 28
+    local resetBtnW = 120
+    local resetBtnH = 32
     local resetBtnX = px + panelW / 2 - resetBtnW / 2
-    local resetBtnY = py + panelH - 45
+    local resetBtnY = py + panelH - 50
 
     nvgBeginPath(vg)
-    nvgRoundedRect(vg, resetBtnX, resetBtnY, resetBtnW, resetBtnH, 5)
+    nvgRoundedRect(vg, resetBtnX, resetBtnY, resetBtnW, resetBtnH, 6)
     nvgFillColor(vg, nvgRGBA(60, 40, 40, alpha))
     nvgFill(vg)
     nvgStrokeColor(vg, nvgRGBA(200, 80, 80, math.floor(alpha * 0.7)))
     nvgStrokeWidth(vg, 1)
     nvgStroke(vg)
 
-    nvgFontSize(vg, 12)
+    nvgFontSize(vg, 14)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(vg, nvgRGBA(220, 100, 100, alpha))
     nvgText(vg, resetBtnX + resetBtnW / 2, resetBtnY + resetBtnH / 2, "恢复默认", nil)
 
     -- 底部提示
-    nvgFontSize(vg, 10)
+    nvgFontSize(vg, 12)
     nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.7)))
     nvgText(vg, screenW_ / 2, py + panelH - 12, "点击按键框修改 · ESC 关闭", nil)
 
