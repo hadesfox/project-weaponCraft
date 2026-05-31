@@ -61,6 +61,12 @@ Config.Forge = {
 -- 试炼场时间选项（秒）
 Config.TrialTimeOptions = { 30, 45, 60, 90, 120 }
 
+-- 各环节时长选项（秒）
+Config.MaterialTimeOptions = { 3, 5, 8, 10, 15 }
+Config.HammerTimeOptions = { 3, 5, 8, 10, 15 }
+Config.QuenchTimeOptions = { 3, 5, 8, 10, 15 }
+Config.GrindTimeOptions = { 2, 3, 5, 8, 10 }
+
 -- 试炼场配置
 Config.Trial = {
     TargetCount = 5,

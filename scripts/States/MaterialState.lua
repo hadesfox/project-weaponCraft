@@ -6,6 +6,7 @@
 local UI = require("urhox-libs/UI")
 local Config = require("Config")
 local NVG = require("NVG")
+local GameSettings = require("GameSettings")
 
 local MaterialState = {}
 
@@ -14,6 +15,7 @@ local onComplete_ = nil
 
 -- 弹幕参数（从 Config 读取）
 local DC = Config.MaterialDanmaku
+local materialDuration_ = DC.Duration  -- 运行时时长（由 GameSettings 覆盖）
 local materials_ = Config.Materials
 
 -- 运行时状态
@@ -31,6 +33,7 @@ local RESULT_SHOW_TIME = 1.2
 function MaterialState.Enter(gameData, onComplete)
     gameData_ = gameData
     onComplete_ = onComplete
+    materialDuration_ = GameSettings.GetMaterialTime()  -- 刷新用户设置
     timer_ = 0
     spawnTimer_ = 0
     bullets_ = {}
@@ -38,7 +41,7 @@ function MaterialState.Enter(gameData, onComplete)
     resultTimer_ = 0
     done_ = false
 
-    print("[MaterialState] Entered - 选材")
+    print("[MaterialState] Entered - 选材, duration=" .. materialDuration_ .. "s")
 end
 
 --- 离开（释放全部状态数据）
@@ -196,7 +199,7 @@ function MaterialState.Update(dt)
     timer_ = timer_ + dt
 
     -- 超时判定
-    if timer_ >= DC.Duration then
+    if timer_ >= materialDuration_ then
         AutoSelect()
         return
     end
@@ -300,7 +303,7 @@ function MaterialState.Render(vg)
 
     -- 倒计时显示
     if not selectedMat_ then
-        local remaining = math.max(0, DC.Duration - timer_)
+        local remaining = math.max(0, materialDuration_ - timer_)
         local timeText = string.format("%.1f", remaining)
         nvgFontFaceId(vg, fontId)
         nvgFontSize(vg, 28)

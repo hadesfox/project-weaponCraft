@@ -713,33 +713,46 @@ function MenuState.HandleSettingsClick(mx, my)
     if mx >= resetBtnX and mx <= resetBtnX + resetBtnW and
        my >= resetBtnY and my <= resetBtnY + resetBtnH then
         KeyBindings.ResetToDefault()
+        GameSettings.ResetDurations()
         return
     end
 
-    -- ====== 试炼时长按钮点击检测 ======
+    -- ====== 环节时长按钮点击检测 ======
     local contentTop = py + 52
     local curY = contentTop + 6 - settingsScroll_
-    curY = curY + 26  -- 跳过【试炼设置】标题
+    curY = curY + 26  -- 跳过【环节时长】标题
 
-    -- 试炼时长按钮组区域
-    local options = Config.TrialTimeOptions
     local btnW = 46
     local btnH = 28
     local btnGap = 8
-    local totalBtnsW = #options * btnW + (#options - 1) * btnGap
-    local btnsStartX = px + panelW - 24 - totalBtnsW
-    local btnRowY = curY + 4
 
-    for oi = 1, #options do
-        local bx = btnsStartX + (oi - 1) * (btnW + btnGap)
-        if mx >= bx and mx <= bx + btnW and
-           my >= btnRowY and my <= btnRowY + btnH then
-            GameSettings.SetTrialTime(options[oi])
-            return
+    local durationClickRows = {
+        { options = Config.MaterialTimeOptions, setter = GameSettings.SetMaterialTime },
+        { options = Config.HammerTimeOptions, setter = GameSettings.SetHammerTime },
+        { options = Config.QuenchTimeOptions, setter = GameSettings.SetQuenchTime },
+        { options = Config.GrindTimeOptions, setter = GameSettings.SetGrindTime },
+        { options = Config.TrialTimeOptions, setter = GameSettings.SetTrialTime },
+    }
+
+    for _, row in ipairs(durationClickRows) do
+        local opts = row.options
+        local totalW = #opts * btnW + (#opts - 1) * btnGap
+        local startX = px + panelW - 24 - totalW
+        local btnRowY = curY + 4
+
+        for oi = 1, #opts do
+            local bx = startX + (oi - 1) * (btnW + btnGap)
+            if mx >= bx and mx <= bx + btnW and
+               my >= btnRowY and my <= btnRowY + btnH then
+                row.setter(opts[oi])
+                return
+            end
         end
+
+        curY = curY + 42
     end
 
-    curY = curY + 42 + 12  -- 跳过按钮行 + 分隔线间距
+    curY = curY + 12  -- 分隔线间距
 
     -- ====== 按键绑定行点击 → 进入重绑定 ======
     -- 使用与 RenderSettingsPanel 完全一致的累加逻辑
@@ -833,59 +846,68 @@ RenderSettingsPanel = function(vg)
 
     local curY = contentTop + 6 - settingsScroll_
 
-    -- ====== 试炼时长设置 ======
+    -- ====== 环节时长设置 ======
     nvgFontSize(vg, 15)
     nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
     nvgFillColor(vg, nvgRGBA(100, 180, 255, math.floor(alpha * 0.8)))
-    nvgText(vg, px + 24, curY, "【试炼设置】", nil)
+    nvgText(vg, px + 24, curY, "【环节时长】", nil)
     curY = curY + 26
 
-    -- 试炼时长行
-    nvgFontSize(vg, 16)
-    nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
-    nvgFillColor(vg, nvgRGBA(200, 205, 210, alpha))
-    nvgText(vg, px + 30, curY + 18, "试炼时长", nil)
-
-    -- 时间选项按钮组
-    local options = Config.TrialTimeOptions
-    local currentTime = GameSettings.GetTrialTime()
+    -- 通用按钮行渲染辅助
     local btnW = 46
     local btnH = 28
     local btnGap = 8
-    local totalBtnsW = #options * btnW + (#options - 1) * btnGap
-    local btnsStartX = px + panelW - 24 - totalBtnsW
 
-    for oi = 1, #options do
-        local optVal = options[oi]
-        local bx = btnsStartX + (oi - 1) * (btnW + btnGap)
-        local by = curY + 4
-        local isSelected = (optVal == currentTime)
+    local durationRows = {
+        { label = "选材时长", options = Config.MaterialTimeOptions, current = GameSettings.GetMaterialTime() },
+        { label = "锤击时长", options = Config.HammerTimeOptions, current = GameSettings.GetHammerTime() },
+        { label = "淬火时长", options = Config.QuenchTimeOptions, current = GameSettings.GetQuenchTime() },
+        { label = "砥砺时长", options = Config.GrindTimeOptions, current = GameSettings.GetGrindTime() },
+        { label = "试炼时长", options = Config.TrialTimeOptions, current = GameSettings.GetTrialTime() },
+    }
 
-        nvgBeginPath(vg)
-        nvgRoundedRect(vg, bx, by, btnW, btnH, 5)
-        if isSelected then
-            nvgFillColor(vg, nvgRGBA(60, 100, 60, alpha))
-            nvgFill(vg)
-            nvgStrokeColor(vg, nvgRGBA(80, 200, 120, alpha))
-        else
-            nvgFillColor(vg, nvgRGBA(40, 42, 52, alpha))
-            nvgFill(vg)
-            nvgStrokeColor(vg, nvgRGBA(80, 80, 95, math.floor(alpha * 0.6)))
+    for _, row in ipairs(durationRows) do
+        nvgFontSize(vg, 16)
+        nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
+        nvgFillColor(vg, nvgRGBA(200, 205, 210, alpha))
+        nvgText(vg, px + 30, curY + 18, row.label, nil)
+
+        local opts = row.options
+        local totalW = #opts * btnW + (#opts - 1) * btnGap
+        local startX = px + panelW - 24 - totalW
+
+        for oi = 1, #opts do
+            local optVal = opts[oi]
+            local bx = startX + (oi - 1) * (btnW + btnGap)
+            local by = curY + 4
+            local isSelected = (optVal == row.current)
+
+            nvgBeginPath(vg)
+            nvgRoundedRect(vg, bx, by, btnW, btnH, 5)
+            if isSelected then
+                nvgFillColor(vg, nvgRGBA(60, 100, 60, alpha))
+                nvgFill(vg)
+                nvgStrokeColor(vg, nvgRGBA(80, 200, 120, alpha))
+            else
+                nvgFillColor(vg, nvgRGBA(40, 42, 52, alpha))
+                nvgFill(vg)
+                nvgStrokeColor(vg, nvgRGBA(80, 80, 95, math.floor(alpha * 0.6)))
+            end
+            nvgStrokeWidth(vg, 1)
+            nvgStroke(vg)
+
+            nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+            nvgFontSize(vg, 13)
+            if isSelected then
+                nvgFillColor(vg, nvgRGBA(80, 220, 130, alpha))
+            else
+                nvgFillColor(vg, nvgRGBA(180, 185, 195, alpha))
+            end
+            nvgText(vg, bx + btnW / 2, by + btnH / 2, tostring(optVal) .. "s", nil)
         end
-        nvgStrokeWidth(vg, 1)
-        nvgStroke(vg)
 
-        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-        nvgFontSize(vg, 13)
-        if isSelected then
-            nvgFillColor(vg, nvgRGBA(80, 220, 130, alpha))
-        else
-            nvgFillColor(vg, nvgRGBA(180, 185, 195, alpha))
-        end
-        nvgText(vg, bx + btnW / 2, by + btnH / 2, tostring(optVal) .. "s", nil)
+        curY = curY + 42
     end
-
-    curY = curY + 42
 
     -- 分隔线（试炼设置与按键设置之间）
     nvgBeginPath(vg)
