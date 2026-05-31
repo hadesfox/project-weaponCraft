@@ -41,9 +41,16 @@ function MaterialState.Enter(gameData, onComplete)
     print("[MaterialState] Entered - 选材")
 end
 
---- 离开
+--- 离开（释放全部状态数据）
 function MaterialState.Leave()
     bullets_ = {}
+    selectedMat_ = nil
+    timer_ = 0
+    spawnTimer_ = 0
+    resultTimer_ = 0
+    done_ = false
+    gameData_ = nil
+    onComplete_ = nil
 end
 
 --- 构建 UI

@@ -337,7 +337,9 @@ function ResultState.Update(dt)
 end
 
 function ResultState.Leave()
-    -- 结果页面无需特殊清理
+    -- 释放引用，让 GC 回收
+    gameData_ = nil
+    onComplete_ = nil
 end
 
 function ResultState.Render(vg)

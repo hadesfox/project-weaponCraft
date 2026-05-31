@@ -173,11 +173,13 @@ end
 
 --- 离开锻造状态
 function ForgeState.Leave()
-    finishTimer_   = -1
-    quenchHolding_ = false
+    -- 停止所有播放中的音效
     StopQuenchSound()
+
+    -- 释放音频子系统
     hammerSource_ = nil
     quenchSource_ = nil
+    grindSource_  = nil
     if audioNode_ then
         audioNode_:Remove()
         audioNode_ = nil
@@ -186,6 +188,51 @@ function ForgeState.Leave()
         audioScene_:Dispose()
         audioScene_ = nil
     end
+
+    -- 释放 Sound 资源引用（让 ResourceCache 可以回收）
+    hammerSound_ = nil
+    quenchSound_ = nil
+    grindSound_  = nil
+
+    -- 重置全部状态变量，释放表内存
+    currentPhase_    = PHASE_HAMMER
+    phaseTimer_      = 0
+    totalScore_      = 0
+    finishTimer_     = -1
+    hammerHits_      = 0
+    hammerFlash_     = 0
+    hammerShake_     = 0
+    hammerRhythm_    = 0
+    hammerHitQuality_ = {}
+    hammerReady_     = true
+    hammerCooldown_  = 0
+    hammerDone_      = false
+    hammerResultTimer_ = 0
+    hammerScore_     = 0
+    hammerWaitClick_ = false
+    hammerTimeLeft_  = 0
+    hammerZoneCenter_ = 0
+    quenchTemp_      = 800
+    quenchTarget_    = 450
+    quenchHolding_   = false
+    quenchHoldTime_  = 0
+    quenchScore_     = 0
+    quenchDone_      = false
+    quenchTimer_     = 0
+    grindCount_      = 0
+    grindKeyIndex_   = 1
+    grindTimer_      = 0
+    grindDone_       = false
+    grindScore_      = 0
+    grindFlash_      = 0
+    grindMissFlash_  = 0
+    grindWaitClick_  = false
+    grindResultTimer_ = 0
+    grindDragging_   = false
+    grindLastDragZone_ = 0
+    gameData_        = nil
+    onComplete_      = nil
+    onPhaseChange_   = nil
 end
 
 

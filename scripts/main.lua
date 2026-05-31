@@ -545,7 +545,7 @@ function SwitchState(newState)
     end
 end
 
---- 离开状态时的清理
+--- 离开状态时的清理（完整释放上一环节所有资源）
 function LeaveState(state)
     if state == Config.States.MENU then
         MenuState.Leave()
@@ -560,6 +560,8 @@ function LeaveState(state)
     elseif state == Config.States.TRIAL then
         TrialState.Leave()
     end
+    -- 强制 GC，立即回收上一环节释放的 Lua 内存
+    collectgarbage("collect")
 end
 
 -- ============================================================================

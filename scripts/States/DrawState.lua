@@ -41,9 +41,13 @@ function DrawState.Enter(gameData, onComplete)
     print("[DrawState] Entered. Waiting for UI layout to determine canvas bounds.")
 end
 
---- 离开状态时清理
+--- 离开状态时清理（释放全部资源）
 function DrawState.Leave()
     pointerDown_ = false
+    canvasAreaPanel_ = nil
+    canvasBoundsReady_ = false
+    -- 清理画布数据释放内存
+    Canvas.Clear()
 end
 
 --- 构建绘制阶段的 UI

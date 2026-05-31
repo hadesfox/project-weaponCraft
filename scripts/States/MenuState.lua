@@ -145,9 +145,7 @@ end
 
 --- 离开菜单状态
 function MenuState.Leave()
-    showCharPanel_ = false
-    charPanelAnim_ = 0
-    -- 释放 GPU 纹理，避免试炼场显存不足
+    -- 释放 GPU 纹理
     local vg = NVG.Get()
     if vg then
         if bgImage_ and bgImage_ ~= 0 then
@@ -165,6 +163,19 @@ function MenuState.Leave()
         end
         charImages_ = {}
     end
+
+    -- 重置 UI/面板状态
+    showCharPanel_ = false
+    charPanelAnim_ = 0
+    showLeaderboard_ = false
+    leaderboardAnim_ = 0
+    menuLeaderboardData_ = {}
+    showSettings_ = false
+    settingsAnim_ = 0
+    rebindingAction_ = nil
+    gameStarted_ = false
+    uiRoot_ = nil
+    onStartGame_ = nil
 end
 
 --- 构建 UI（仅角色面板悬浮层用 UI 组件）

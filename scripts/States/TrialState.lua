@@ -495,10 +495,7 @@ end
 
 --- 离开试炼状态
 function TrialState.Leave()
-    targets_ = {}
-    platforms_ = {}
-    attacking_ = false
-    weaponStrokes_ = {}
+    -- ① 释放 GPU 纹理
     if playerImage_ and playerImage_ ~= 0 then
         nvgDeleteImage(NVG.Get(), playerImage_)
         playerImage_ = nil
@@ -507,17 +504,44 @@ function TrialState.Leave()
         nvgDeleteImage(NVG.Get(), enemyImage_)
         enemyImage_ = nil
     end
-    -- 释放跑步帧
     for i = 1, #playerRunFrames_ do
         if playerRunFrames_[i] and playerRunFrames_[i] ~= 0 then
             nvgDeleteImage(NVG.Get(), playerRunFrames_[i])
         end
     end
     playerRunFrames_ = {}
-    -- 释放史莱姆
+
+    -- ② 释放子模块资源
     Slime.Shutdown()
-    -- 释放渲染器图片（背景/dummy）
     Renderer.ReleaseImages(NVG.Get())
+
+    -- ③ 清空大型游戏数据表
+    targets_ = {}
+    platforms_ = {}
+    platformDefs_ = {}
+    targetDefs_ = {}
+    attacks_ = {}
+    attackHitTargets_ = {}
+    hitEffects_ = {}
+    weaponStrokes_ = {}
+    formAttacks_ = { {}, {} }
+    formStrokes_ = { {}, {} }
+    dummyAttacks_ = {}
+    leaderboardData_ = {}
+
+    -- ④ 重置状态标志
+    attacking_ = false
+    trialEnded_ = false
+    showEndScreen_ = false
+    dummyAttacking_ = false
+    deflecting_ = false
+    dummy_ = nil
+    dummyDef_ = nil
+    dummyWeapon_ = nil
+    materialEffect_ = nil
+    uiRoot_ = nil
+    gameData_ = nil
+    onComplete_ = nil
 end
 
 --- 生成平台（多层复杂布局）
