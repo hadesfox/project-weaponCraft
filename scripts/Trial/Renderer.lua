@@ -618,12 +618,19 @@ function Renderer.RenderCombo(vg, S)
     nvgFontFaceId(vg, fontId)
     local size = math.min(32, 16 + S.combo * 2)
     local pulse = 1.0 + math.sin(S.comboTimer * 8) * 0.08
-    nvgFontSize(vg, math.floor(size * pulse))
+    -- 使用固定字号 + nvgScale 做 pulse 缩放，避免字体图集膨胀
+    nvgFontSize(vg, size)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
 
     local alpha = math.floor(255 * math.max(0, 1.0 - S.comboTimer / Config.Trial.ComboDecayTime))
     nvgFillColor(vg, nvgRGBA(160, 140, 90, alpha))
-    nvgText(vg, S.screenW / 2, 90, S.combo .. " COMBO!", nil)
+    local tx = S.screenW / 2
+    local ty = 90
+    nvgSave(vg)
+    nvgTranslate(vg, tx, ty)
+    nvgScale(vg, pulse, pulse)
+    nvgText(vg, 0, 0, S.combo .. " COMBO!", nil)
+    nvgRestore(vg)
 end
 
 --- 变形特效渲染

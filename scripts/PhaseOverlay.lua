@@ -567,12 +567,18 @@ local function RenderIronGate(vg, cx, cy, gateW, gateH, crackLevel, scale)
         local fontId = NVG.GetFont()
         if fontId ~= -1 then
             nvgFontFaceId(vg, fontId)
-            local fontSize = math.floor(math.min(hw * 1.4, hh * 0.7) * 2)
-            nvgFontSize(vg, fontSize)
+            -- 使用固定基础字号 + nvgScale 缩放，避免巨大字号爆字体图集
+            local BASE_FONT = 36
+            local targetSize = math.min(hw * 1.4, hh * 0.7) * 2
+            local fontScale = targetSize / BASE_FONT
+            nvgFontSize(vg, BASE_FONT)
             nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+            nvgSave(vg)
+            nvgScale(vg, fontScale, fontScale)
             -- 底层阴影（凿刻深度感）
             nvgFillColor(vg, nvgRGBA(10, 8, 12, 160))
-            nvgText(vg, 2 * scale, 2 * scale, phaseChar, nil)
+            local shadowOff = (2 * scale) / fontScale
+            nvgText(vg, shadowOff, shadowOff, phaseChar, nil)
             -- 主体文字（金属浮雕色，随碎裂程度变红）
             local tr = math.min(255, 140 + crackLevel * 25)
             local tg = math.max(60, 120 - crackLevel * 15)
@@ -581,7 +587,10 @@ local function RenderIronGate(vg, cx, cy, gateW, gateH, crackLevel, scale)
             nvgText(vg, 0, 0, phaseChar, nil)
             -- 高光（顶部偏移，金属反光）
             nvgFillColor(vg, nvgRGBA(220, 210, 190, 50 - crackLevel * 8))
-            nvgText(vg, -1 * scale, -2 * scale, phaseChar, nil)
+            local hlOff = (-1 * scale) / fontScale
+            local hlOffY = (-2 * scale) / fontScale
+            nvgText(vg, hlOff, hlOffY, phaseChar, nil)
+            nvgRestore(vg)
         end
     end
 
@@ -589,10 +598,16 @@ local function RenderIronGate(vg, cx, cy, gateW, gateH, crackLevel, scale)
     local fontId = NVG.GetFont()
     if fontId ~= -1 then
         nvgFontFaceId(vg, fontId)
-        nvgFontSize(vg, math.floor(11 * scale))
+        -- 使用固定字号 + nvgScale 缩放，避免 scale 动画期间每帧产生不同字号
+        nvgFontSize(vg, 11)
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
         nvgFillColor(vg, nvgRGBA(140, 130, 120, 180))
-        nvgText(vg, 0, hh + 14 * scale, "阶段" .. (currentPhase_ > 0 and tostring(currentPhase_) or ""), nil)
+        nvgSave(vg)
+        local labelY = hh + 14 * scale
+        nvgTranslate(vg, 0, labelY)
+        nvgScale(vg, scale, scale)
+        nvgText(vg, 0, 0, "阶段" .. (currentPhase_ > 0 and tostring(currentPhase_) or ""), nil)
+        nvgRestore(vg)
     end
 
     nvgRestore(vg)

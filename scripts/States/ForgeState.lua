@@ -1240,14 +1240,20 @@ RenderQuenchPhase = function(vg, w, h)
     nvgFill(vg)
     
     nvgFontFaceId(vg, fontId)
-    nvgFontSize(vg, math.floor(math.min(32, countdownR * 1.8) * pulseScale))
+    local baseFontSz = math.floor(math.min(32, countdownR * 1.8))
+    nvgFontSize(vg, baseFontSz)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(vg, nvgRGBA(255, 255, 255, 255))
+    -- 使用 nvgScale 做 pulse 缩放，避免每帧不同字号导致字体图集膨胀
+    nvgSave(vg)
+    nvgTranslate(vg, cx, countdownY)
+    nvgScale(vg, pulseScale, pulseScale)
     if quenchDone_ then
-        nvgText(vg, cx, countdownY, "停!", nil)
+        nvgText(vg, 0, 0, "停!", nil)
     else
-        nvgText(vg, cx, countdownY, countdownText, nil)
+        nvgText(vg, 0, 0, countdownText, nil)
     end
+    nvgRestore(vg)
     
     -- ================================================================
     -- ② 温度计
