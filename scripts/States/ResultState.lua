@@ -193,6 +193,23 @@ function ResultState.BuildUI()
                                 },
                             },
                             UI.Panel {
+                                width = "80%",
+                                flexDirection = "row",
+                                justifyContent = "space-between",
+                                children = {
+                                    UI.Label {
+                                        text = "⚡ 砥砺",
+                                        fontSize = 12,
+                                        fontColor = { 120, 130, 140, 255 },
+                                    },
+                                    UI.Label {
+                                        text = tostring(gameData_.grindScore or 0),
+                                        fontSize = 12,
+                                        fontColor = { 120, 130, 140, 255 },
+                                    },
+                                },
+                            },
+                            UI.Panel {
                                 width = "80%", height = 1,
                                 backgroundColor = { 50, 50, 55, 100 },
                                 marginTop = 2, marginBottom = 2,

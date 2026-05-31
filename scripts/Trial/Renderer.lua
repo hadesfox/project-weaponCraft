@@ -719,4 +719,96 @@ function Renderer.RenderWeaponClash(vg, S)
     nvgStroke(vg)
 end
 
+-- ============================================================================
+-- 血条渲染
+-- ============================================================================
+
+--- 渲染单个血条
+--- @param vg userdata
+--- @param cx number 中心X
+--- @param cy number 顶部Y（血条上沿）
+--- @param hp number 当前HP
+--- @param maxHp number 最大HP
+--- @param physScale number 物理缩放
+local function RenderHPBar(vg, cx, cy, hp, maxHp, physScale)
+    if hp >= maxHp then return end  -- 满血不显示
+    if hp <= 0 then return end      -- 已死不显示
+
+    local barW = Config.Combat.HPBarWidth * physScale
+    local barH = Config.Combat.HPBarHeight * physScale
+    local x = cx - barW / 2
+    local y = cy
+
+    -- 背景
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, x, y, barW, barH, barH / 2)
+    nvgFillColor(vg, nvgRGBA(20, 20, 20, 180))
+    nvgFill(vg)
+
+    -- HP 填充
+    local ratio = hp / maxHp
+    local fillW = barW * ratio
+
+    -- 颜色根据血量比例变化：绿→黄→红
+    local r, g, b
+    if ratio > 0.5 then
+        local t = (ratio - 0.5) * 2
+        r = math.floor(255 * (1 - t) + 80 * t)
+        g = math.floor(200 * t + 200 * (1 - t))
+        b = 60
+    else
+        local t = ratio * 2
+        r = 240
+        g = math.floor(200 * t)
+        b = math.floor(60 * t)
+    end
+
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, x, y, fillW, barH, barH / 2)
+    nvgFillColor(vg, nvgRGBA(r, g, b, 230))
+    nvgFill(vg)
+
+    -- 边框
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, x, y, barW, barH, barH / 2)
+    nvgStrokeColor(vg, nvgRGBA(40, 40, 40, 200))
+    nvgStrokeWidth(vg, 1)
+    nvgStroke(vg)
+end
+
+--- 渲染所有靶子血条
+--- @param vg userdata
+--- @param S table
+function Renderer.RenderTargetHPBars(vg, S)
+    for i = 1, #S.targets do
+        local t = S.targets[i]
+        if t.alive and t.hp and t.maxHp then
+            local tx = t.x + (t.knockX or 0)
+            local ty = t.y + (t.knockY or 0)
+            local offsetY = Config.Combat.HPBarOffsetY * S.physScale
+            -- 血条位于敌人头顶
+            local barY = ty - (t.size or 30) + offsetY
+            RenderHPBar(vg, tx, barY, t.hp, t.maxHp, S.physScale)
+        end
+    end
+end
+
+--- 渲染木桩血条
+--- @param vg userdata
+--- @param S table
+function Renderer.RenderDummyHPBar(vg, S)
+    if not S.dummy then return end
+    local d = S.dummy
+    if not d.hp or not d.maxHp then return end
+
+    local shakeX = 0
+    if d.hitAnim > 0 then
+        shakeX = math.sin(d.hitAnim * 20) * 4 * d.hitAnim * (d.hitDir or 0)
+    end
+
+    local cx = d.x + shakeX
+    local barY = d.y - d.height - Config.Combat.HPBarHeight * S.physScale - 8 * S.physScale
+    RenderHPBar(vg, cx, barY, d.hp, d.maxHp, S.physScale)
+end
+
 return Renderer

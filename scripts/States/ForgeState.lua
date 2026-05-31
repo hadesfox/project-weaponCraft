@@ -28,7 +28,8 @@ local quenchSource_ = nil  -- 淬火循环音源（预创建，复用）
 -- 锻造阶段
 local PHASE_HAMMER  = 1   -- 锤击
 local PHASE_QUENCH  = 2   -- 淬火
-local PHASE_DONE     = 3
+local PHASE_GRIND   = 3   -- 砥砺
+local PHASE_DONE    = 4
 
 local currentPhase_    = PHASE_HAMMER
 local phaseTimer_      = 0
@@ -63,16 +64,32 @@ local quenchScore_       = 0      -- 淬火评分
 local quenchDone_        = false
 local quenchTimer_       = 0      -- 淬火已用时间
 
+-- 砥砺阶段变量
+local GRIND_TIME_LIMIT   = Config.Forge.GrindDuration  -- 3秒
+local GRIND_KEYS         = Config.Forge.GrindKeys      -- {"J","K","L"}
+local grindCount_        = 0      -- 完成打磨次数
+local grindKeyIndex_     = 1      -- 当前期待的按键序列索引（1~3）
+local grindTimer_        = 0      -- 砥砺已用时间
+local grindDone_         = false  -- 砥砺是否结束
+local grindScore_        = 0      -- 砥砺得分
+local grindFlash_        = 0      -- 按对闪光
+local grindMissFlash_    = 0      -- 按错闪光
+local grindWaitClick_    = false  -- 淬火结果展示后等待点击进入砥砺
+local grindResultTimer_  = 0      -- 砥砺结果展示倒计时
+
 -- 延迟结束计时器（替代旧的匿名事件订阅）
 local finishTimer_ = -1      -- <0 表示未激活
 
 -- 前向声明内部函数（避免全局泄漏）
 local InitHammerPhase
 local InitQuenchPhase
+local InitGrindPhase
 local FinalizeHammer
 local UpdateHammer
 local UpdateQuench
+local UpdateGrind
 local FinishQuench
+local FinishGrind
 local EvaluateHammerTiming
 local PlayHammerSound
 local StartQuenchSound
@@ -81,6 +98,7 @@ local OnForgeInput
 local OnForgeInputRelease
 local RenderHammerPhase
 local RenderQuenchPhase
+local RenderGrindPhase
 
 
 --- 进入锻造状态
@@ -196,6 +214,24 @@ InitQuenchPhase = function()
 end
 
 
+--- 初始化砥砺阶段
+---@diagnostic disable-next-line: redefined-local
+InitGrindPhase = function()
+    grindCount_       = 0
+    grindKeyIndex_    = 1
+    grindTimer_       = 0
+    grindDone_        = false
+    grindScore_       = 0
+    grindFlash_       = 0
+    grindMissFlash_   = 0
+    grindWaitClick_   = false
+    grindResultTimer_ = 0
+    phaseTimer_       = 0
+    
+    print("[Forge/Grind] Start! Press J→K→L to grind, time limit: " .. GRIND_TIME_LIMIT .. "s")
+end
+
+
 --- 构建锻造 UI
 function ForgeState.BuildUI()
     return UI.Panel {
@@ -267,6 +303,8 @@ function ForgeState.Update(dt)
         UpdateHammer(dt)
     elseif currentPhase_ == PHASE_QUENCH then
         UpdateQuench(dt)
+    elseif currentPhase_ == PHASE_GRIND then
+        UpdateGrind(dt)
     end
 end
 
@@ -395,7 +433,7 @@ UpdateQuench = function(dt)
 end
 
 
---- 结束淬火，计算得分
+--- 结束淬火，计算得分，进入砥砺等待
 FinishQuench = function()
     if quenchDone_ then return end
     quenchDone_  = true
@@ -418,12 +456,55 @@ FinishQuench = function()
         quenchScore_ = 10   -- 很差
     end
     
-    -- 总分计算
     totalScore_ = totalScore_ + quenchScore_
-    local finalScore = math.floor(totalScore_ / 2)  -- 两阶段平均
+    grindWaitClick_ = true  -- 等待玩家点击进入砥砺
+    
+    print("[Forge/Quench] Done! Temp: " .. math.floor(quenchTemp_) .. " Target: " .. quenchTarget_ .. " Diff: " .. math.floor(diff) .. " Score: " .. quenchScore_)
+end
+
+
+--- 砥砺更新
+UpdateGrind = function(dt)
+    -- 衰减闪光
+    if grindFlash_ > 0 then grindFlash_ = grindFlash_ - dt * 5 end
+    if grindMissFlash_ > 0 then grindMissFlash_ = grindMissFlash_ - dt * 5 end
+    
+    if grindDone_ then
+        grindResultTimer_ = grindResultTimer_ + dt
+        return
+    end
+    
+    -- 倒计时
+    grindTimer_ = grindTimer_ + dt
+    if grindTimer_ >= GRIND_TIME_LIMIT then
+        FinishGrind()
+    end
+end
+
+
+--- 结束砥砺，计算最终得分
+FinishGrind = function()
+    if grindDone_ then return end
+    grindDone_ = true
+    
+    -- 根据打磨次数查表得分
+    local scoreTable = Config.Forge.GrindScoreTable
+    local maxCount = Config.Forge.GrindMaxCount
+    local count = math.min(grindCount_, maxCount)
+    grindScore_ = scoreTable[count] or 100
+    
+    totalScore_ = totalScore_ + grindScore_
+    
+    -- 三阶段平均得最终分
+    local finalScore = math.floor(totalScore_ / 3)
     gameData_.forgeScore = finalScore
     gameData_.hammerScore = hammerScore_
     gameData_.quenchScore = quenchScore_
+    gameData_.grindScore = grindScore_
+    gameData_.grindCount = grindCount_
+    
+    -- 攻速加成：砥砺得分越高，攻速越快（0%~30%加成）
+    gameData_.attackSpeedBonus = grindScore_ / 100 * 0.3
     
     -- 确定品质
     for i = #Config.Quality, 1, -1 do
@@ -433,8 +514,9 @@ FinishQuench = function()
         end
     end
     
-    print("[Forge/Quench] Done! Temp: " .. math.floor(quenchTemp_) .. " Target: " .. quenchTarget_ .. " Diff: " .. math.floor(diff) .. " Score: " .. quenchScore_)
-    print("[Forge] Quality: " .. (gameData_.quality and gameData_.quality.name or "???"))
+    print("[Forge/Grind] Done! Count: " .. grindCount_ .. " Score: " .. grindScore_)
+    print("[Forge] Final score: " .. finalScore .. " Quality: " .. (gameData_.quality and gameData_.quality.name or "???"))
+    print("[Forge] Attack speed bonus: " .. string.format("%.0f%%", gameData_.attackSpeedBonus * 100))
     
     -- 启动延迟结束计时器
     finishTimer_ = 0
@@ -511,6 +593,13 @@ OnForgeInput = function()
             PlayHammerSound()
         end
     elseif currentPhase_ == PHASE_QUENCH then
+        -- 淬火完成后等待点击进入砥砺
+        if quenchDone_ and grindWaitClick_ then
+            grindWaitClick_ = false
+            currentPhase_ = PHASE_GRIND
+            InitGrindPhase()
+            return
+        end
         if not quenchDone_ then
             quenchHolding_ = true
             StartQuenchSound()
@@ -533,6 +622,35 @@ end
 function ForgeState.OnKeyDown(key)
     if key == KEY_SPACE then
         OnForgeInput()
+        return
+    end
+    
+    -- 砥砺阶段：J/K/L 按键处理
+    if currentPhase_ == PHASE_GRIND and not grindDone_ then
+        local keyName = nil
+        if key == KEY_J then keyName = "J"
+        elseif key == KEY_K then keyName = "K"
+        elseif key == KEY_L then keyName = "L"
+        end
+        
+        if keyName then
+            local expected = GRIND_KEYS[grindKeyIndex_]
+            if keyName == expected then
+                -- 按对了
+                grindKeyIndex_ = grindKeyIndex_ + 1
+                grindFlash_ = 1.0
+                if grindKeyIndex_ > #GRIND_KEYS then
+                    -- 完成一轮打磨
+                    grindCount_ = grindCount_ + 1
+                    grindKeyIndex_ = 1
+                    print("[Forge/Grind] Completed cycle #" .. grindCount_)
+                end
+            else
+                -- 按错了，重置当前轮序列
+                grindKeyIndex_ = 1
+                grindMissFlash_ = 1.0
+            end
+        end
     end
 end
 
@@ -603,6 +721,8 @@ function ForgeState.Render(vg)
         RenderHammerPhase(vg, lw, lh)
     elseif currentPhase_ == PHASE_QUENCH then
         RenderQuenchPhase(vg, lw, lh)
+    elseif currentPhase_ == PHASE_GRIND then
+        RenderGrindPhase(vg, lw, lh)
     end
     
     nvgResetTransform(vg)
@@ -768,17 +888,17 @@ local function RenderHammerHUD(vg, w, cx, cy, dotsY)
     if fontId == -1 then return end
     nvgFontFaceId(vg, fontId)
     
-    -- 倒计时（右上角）
+    -- 倒计时（铁砧右侧，大字醒目）
     if not hammerDone_ then
         local timeText = string.format("%.1f", math.max(0, hammerTimeLeft_))
-        nvgFontSize(vg, 16)
-        nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
+        nvgFontSize(vg, 36)
+        nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
         if hammerTimeLeft_ <= 3.0 then
             nvgFillColor(vg, nvgRGBA(C_DANGER[1], C_DANGER[2], C_DANGER[3], 255))
         else
-            nvgFillColor(vg, nvgRGBA(120, 130, 140, 200))
+            nvgFillColor(vg, nvgRGBA(200, 205, 210, 230))
         end
-        nvgText(vg, w - 16, 50, timeText .. "s", nil)
+        nvgText(vg, cx + 100, cy - 10, timeText .. "s", nil)
     end
     
     -- 锤击结果展示
@@ -889,8 +1009,50 @@ end
 -- 淬火阶段渲染（自适应布局，适配任意宽高比）
 -- ============================================================================
 
---- 渲染淬火倒计时（位置由参数指定，不再依赖 cy）
-local function RenderQuenchCountdown(vg, cx, countdownY, fontId)
+--- 淬火阶段主渲染入口（完全自适应布局）
+--- 布局策略：在 UI 顶栏和底栏之间的可用区域内，紧凑排列所有元素并整体居中
+RenderQuenchPhase = function(vg, w, h)
+    local cx = w / 2
+    
+    local fontId = NVG.GetFont()
+    if fontId == -1 then return end
+    nvgFontFaceId(vg, fontId)
+    
+    -- ================================================================
+    -- 可用区域：去除顶部 UI 栏(~44px) 和底部 UI 栏(~44px) 后的中间区域
+    -- ================================================================
+    local topMargin    = 44
+    local bottomMargin = 44
+    local availTop     = topMargin
+    local availBottom  = h - bottomMargin
+    local availH       = availBottom - availTop
+    
+    -- ================================================================
+    -- 元素尺寸计算（全部基于 availH 按比例分配）
+    -- 倒计时圆: 18%  间距: 4%  温度计: 50%  间距: 4%  提示: 余量
+    -- ================================================================
+    local countdownR   = math.min(32, availH * 0.08)      -- 倒计时圆半径
+    local countdownH   = countdownR * 2                    -- 倒计时占据高度
+    local gap1         = availH * 0.03                     -- 倒计时与温度计间距
+    local barH         = math.min(160, availH * 0.48)      -- 温度计高度
+    local barW         = math.min(44, availH * 0.12)       -- 温度计宽度
+    local gap2         = availH * 0.03                     -- 温度计与温度数字间距
+    local tempFontSize = math.max(12, math.min(20, math.floor(availH * 0.05)))
+    local gap3         = availH * 0.02                     -- 温度数字与提示间距
+    local statusFontSz = math.max(11, math.min(16, math.floor(availH * 0.04)))
+    local subFontSz    = math.max(10, math.min(13, math.floor(availH * 0.032)))
+    
+    -- 总内容高度
+    local totalContentH = countdownH + gap1 + barH + gap2 + tempFontSize + gap3 + statusFontSz + 4 + subFontSz
+    
+    -- 整体居中起始 Y
+    local startY = availTop + (availH - totalContentH) / 2
+    if startY < availTop + 4 then startY = availTop + 4 end
+    
+    -- ================================================================
+    -- ① 倒计时圆
+    -- ================================================================
+    local countdownY = startY + countdownR
     local remaining = math.max(0, QUENCH_TIME_LIMIT - quenchTimer_)
     local countdownText = string.format("%.1f", remaining)
     local pulseScale = 1.0
@@ -899,7 +1061,7 @@ local function RenderQuenchCountdown(vg, cx, countdownY, fontId)
     end
     
     nvgBeginPath(vg)
-    nvgCircle(vg, cx, countdownY, 38 * pulseScale)
+    nvgCircle(vg, cx, countdownY, countdownR * pulseScale)
     if remaining < 1.0 then
         nvgFillColor(vg, nvgRGBA(240, 80, 80, 200))
     elseif remaining < 2.0 then
@@ -910,7 +1072,7 @@ local function RenderQuenchCountdown(vg, cx, countdownY, fontId)
     nvgFill(vg)
     
     nvgFontFaceId(vg, fontId)
-    nvgFontSize(vg, 36 * pulseScale)
+    nvgFontSize(vg, math.min(32, countdownR * 1.8) * pulseScale)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(vg, nvgRGBA(255, 255, 255, 255))
     if quenchDone_ then
@@ -918,41 +1080,42 @@ local function RenderQuenchCountdown(vg, cx, countdownY, fontId)
     else
         nvgText(vg, cx, countdownY, countdownText, nil)
     end
-end
-
-
---- 渲染温度计（高度和位置完全自适应屏幕高度 h）
----@return number 温度计底部的 Y 坐标（用于紧接着渲染提示文字）
-local function RenderThermometer(vg, cx, barY, maxBarH, barW, fontId)
+    
+    -- ================================================================
+    -- ② 温度计
+    -- ================================================================
+    local barTop = startY + countdownH + gap1
+    local barX   = cx - barW / 2
+    
     -- 背景
     nvgBeginPath(vg)
-    nvgRoundedRect(vg, barX - 4, barY - 4, barW + 8, maxBarH + 8, 8)
+    nvgRoundedRect(vg, barX - 4, barTop - 4, barW + 8, barH + 8, 8)
     nvgFillColor(vg, nvgRGBA(50, 50, 55, 255))
     nvgFill(vg)
     
     -- 温度填充
     local maxTemp = 900
     local fillRatio = math.max(0, math.min(1, quenchTemp_ / maxTemp))
-    local fillH = maxBarH * fillRatio
+    local fillH = barH * fillRatio
     
     local r, g, b
     if fillRatio > 0.6 then
-        r, g, b = 200, 80, 40      -- 炭火红（高温）
+        r, g, b = 200, 80, 40
     elseif fillRatio > 0.3 then
-        r, g, b = 160, 140, 90     -- 金黄（中温）
+        r, g, b = 160, 140, 90
     else
-        r, g, b = 150, 200, 255    -- 冰霜蓝（低温）
+        r, g, b = 150, 200, 255
     end
     
     nvgBeginPath(vg)
-    nvgRoundedRect(vg, barX, barY + (maxBarH - fillH), barW, fillH, 4)
+    nvgRoundedRect(vg, barX, barTop + (barH - fillH), barW, fillH, 4)
     nvgFillColor(vg, nvgRGBA(r, g, b, 230))
     nvgFill(vg)
     
     -- 目标区域高亮
     local targetRatio = quenchTarget_ / maxTemp
-    local targetY    = barY + maxBarH * (1 - targetRatio)
-    local tolPixel   = (quenchTolerance_ / maxTemp) * maxBarH
+    local targetY     = barTop + barH * (1 - targetRatio)
+    local tolPixel    = (quenchTolerance_ / maxTemp) * barH
     nvgBeginPath(vg)
     nvgRect(vg, barX - 12, targetY - tolPixel, barW + 24, tolPixel * 2)
     nvgFillColor(vg, nvgRGBA(150, 200, 255, 35))
@@ -968,29 +1131,25 @@ local function RenderThermometer(vg, cx, barY, maxBarH, barW, fontId)
     
     -- 目标温度标签
     nvgFontFaceId(vg, fontId)
-    nvgFontSize(vg, 13)
+    nvgFontSize(vg, math.max(11, math.min(13, math.floor(barH * 0.08))))
     nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
     nvgFillColor(vg, nvgRGBA(150, 200, 255, 255))
-    nvgText(vg, barX + barW + 20, targetY, math.floor(quenchTarget_) .. "°", nil)
+    nvgText(vg, barX + barW + 16, targetY, math.floor(quenchTarget_) .. "°", nil)
     
-    -- 当前温度数字（显示在温度计正下方，自适应字体大小）
-    local tempFontSize = math.min(22, math.floor(maxBarH * 0.12))
-    if tempFontSize < 12 then tempFontSize = 12 end
+    -- ================================================================
+    -- ③ 当前温度数字
+    -- ================================================================
+    local tempTextY = barTop + barH + gap2
+    nvgFontFaceId(vg, fontId)
     nvgFontSize(vg, tempFontSize)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
     nvgFillColor(vg, nvgRGBA(r, g, b, 255))
-    nvgText(vg, cx, barY + maxBarH + 10, math.floor(quenchTemp_) .. "°", nil)
+    nvgText(vg, cx, tempTextY, math.floor(quenchTemp_) .. "°", nil)
     
-    return barY + maxBarH + 10 + tempFontSize + 8  -- 返回提示文字的合理起始 Y
-end
-
-
---- 渲染淬火状态提示（自适应，确保不超出屏幕底部）
-local function RenderQuenchStatus(vg, cx, textStartY, h, fontId)
-    -- 确保提示文字在屏幕内：若 textStartY 太接近底部，则向上收
-    local bottomMargin = 40
-    local statusY = math.min(textStartY + 36, h - bottomMargin)
-    
+    -- ================================================================
+    -- ④ 状态提示文字
+    -- ================================================================
+    local statusY = tempTextY + tempFontSize + gap3
     nvgFontFaceId(vg, fontId)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
     
@@ -1010,54 +1169,206 @@ local function RenderQuenchStatus(vg, cx, textStartY, h, fontId)
             resultText = "偏差较大"
             nvgFillColor(vg, nvgRGBA(120, 130, 140, 255))
         end
-        nvgFontSize(vg, math.min(22, math.floor(h * 0.032)))
+        nvgFontSize(vg, statusFontSz)
         nvgText(vg, cx, statusY, resultText, nil)
+        
+        -- 等待点击进入砥砺
+        if grindWaitClick_ then
+            nvgFontSize(vg, subFontSz)
+            nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 220))
+            nvgText(vg, cx, statusY + statusFontSz + 4, "👆 点击进入砥砺", nil)
+        end
     else
         nvgFillColor(vg, nvgRGBA(255, 255, 255, 230))
-        nvgFontSize(vg, math.min(18, math.floor(h * 0.028)))
+        nvgFontSize(vg, statusFontSz)
         if quenchHolding_ then
             nvgText(vg, cx, statusY, "淬火中... 松开即停止!", nil)
-            -- 第二行提示
-            nvgFontSize(vg, math.min(14, math.floor(h * 0.022)))
-            nvgFillColor(vg, nvgRGBA(150, 200, 255, 200))
-            nvgText(vg, cx, statusY + 28, "停在蓝线上!", nil)
         else
             nvgText(vg, cx, statusY, "按住淬火，松开停止!", nil)
-            nvgFontSize(vg, math.min(14, math.floor(h * 0.022)))
-            nvgFillColor(vg, nvgRGBA(150, 200, 255, 200))
-            nvgText(vg, cx, statusY + 28, "停在蓝线上!", nil)
         end
+        -- 第二行提示
+        nvgFontSize(vg, subFontSz)
+        nvgFillColor(vg, nvgRGBA(150, 200, 255, 200))
+        nvgText(vg, cx, statusY + statusFontSz + 4, "停在蓝线上!", nil)
     end
 end
 
 
---- 淬火阶段主渲染入口（完全自适应布局）
-RenderQuenchPhase = function(vg, w, h)
+-- ============================================================================
+-- 砥砺阶段渲染
+-- ============================================================================
+
+--- 砥砺阶段主渲染入口
+RenderGrindPhase = function(vg, w, h)
     local cx = w / 2
+    local cy = h / 2
     
     local fontId = NVG.GetFont()
     if fontId == -1 then return end
     nvgFontFaceId(vg, fontId)
     
-    -- ================================================================
-    -- 所有 Y 坐标基于屏幕高度 h 计算，适配任意宽高比（含 20:9）
-    -- ================================================================
+    -- 淬火结果等待点击（显示在淬火阶段结束后、砥砺开始前）
+    -- 注：此分支实际不会在 PHASE_GRIND 中触发，因为点击后才进入 PHASE_GRIND
+    -- 但作为安全保护保留
     
-    -- ① 倒计时：屏幕高度 11% 处（20:9 下也不会太靠上）
-    local countdownY = h * 0.11
-    RenderQuenchCountdown(vg, cx, countdownY, fontId)
+    -- 倒计时
+    local remaining = math.max(0, GRIND_TIME_LIMIT - grindTimer_)
     
-    -- ② 温度计：高度自适应，最多为屏幕高度的 50%，从屏幕 20% 高度处开始
-    local maxBarH  = math.min(180, h * 0.50)
-    local barW     = 44
-    local barX     = cx - barW / 2
-    local barY     = h * 0.20  -- 温度计顶部位置
+    -- 背景砂轮装饰
+    local wheelR = math.min(80, h * 0.15)
+    nvgBeginPath(vg)
+    nvgCircle(vg, cx, cy - 10, wheelR)
+    nvgFillColor(vg, nvgRGBA(60, 58, 55, 200))
+    nvgFill(vg)
+    nvgStrokeColor(vg, nvgRGBA(90, 85, 80, 255))
+    nvgStrokeWidth(vg, 3)
+    nvgStroke(vg)
     
-    -- 温度计底部之后的文字起始位置
-    local textStartY = RenderThermometer(vg, cx, barY, maxBarH, barW, fontId)
+    -- 砂轮纹理（旋转线条）
+    local rotAngle = phaseTimer_ * 3.0  -- 持续旋转
+    for i = 0, 5 do
+        local angle = rotAngle + i * (math.pi / 3)
+        local x1 = cx + math.cos(angle) * wheelR * 0.3
+        local y1 = cy - 10 + math.sin(angle) * wheelR * 0.3
+        local x2 = cx + math.cos(angle) * wheelR * 0.85
+        local y2 = cy - 10 + math.sin(angle) * wheelR * 0.85
+        nvgBeginPath(vg)
+        nvgMoveTo(vg, x1, y1)
+        nvgLineTo(vg, x2, y2)
+        nvgStrokeColor(vg, nvgRGBA(80, 75, 70, 150))
+        nvgStrokeWidth(vg, 2)
+        nvgStroke(vg)
+    end
     
-    -- ③ 状态提示：紧跟温度计，确保不超出屏幕底部
-    RenderQuenchStatus(vg, cx, textStartY, h, fontId)
+    -- 正确按键闪光
+    if grindFlash_ > 0 then
+        nvgBeginPath(vg)
+        nvgCircle(vg, cx, cy - 10, wheelR + 10 + (1 - grindFlash_) * 20)
+        nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], math.floor(grindFlash_ * 80)))
+        nvgFill(vg)
+    end
+    
+    -- 按错闪光
+    if grindMissFlash_ > 0 then
+        nvgBeginPath(vg)
+        nvgCircle(vg, cx, cy - 10, wheelR + 5)
+        nvgFillColor(vg, nvgRGBA(C_DANGER[1], C_DANGER[2], C_DANGER[3], math.floor(grindMissFlash_ * 80)))
+        nvgFill(vg)
+    end
+    
+    -- 按键序列显示
+    local keyBoxW = 44
+    local keySpacing = 56
+    local keysStartX = cx - (#GRIND_KEYS - 1) * keySpacing / 2
+    local keysY = cy + wheelR + 30
+    
+    for i = 1, #GRIND_KEYS do
+        local kx = keysStartX + (i - 1) * keySpacing
+        local isActive = (i == grindKeyIndex_) and not grindDone_
+        local isDone = i < grindKeyIndex_
+        
+        -- 按键方框
+        nvgBeginPath(vg)
+        nvgRoundedRect(vg, kx - keyBoxW / 2, keysY - keyBoxW / 2, keyBoxW, keyBoxW, 8)
+        if isDone then
+            nvgFillColor(vg, nvgRGBA(C_SUCCESS[1], C_SUCCESS[2], C_SUCCESS[3], 180))
+        elseif isActive then
+            local pulse = math.abs(math.sin(phaseTimer_ * 4)) * 0.3 + 0.7
+            nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], math.floor(pulse * 200)))
+        else
+            nvgFillColor(vg, nvgRGBA(40, 42, 48, 200))
+        end
+        nvgFill(vg)
+        nvgStrokeColor(vg, nvgRGBA(100, 100, 110, 200))
+        nvgStrokeWidth(vg, 2)
+        nvgStroke(vg)
+        
+        -- 按键字母
+        nvgFontFaceId(vg, fontId)
+        nvgFontSize(vg, 22)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+        if isDone then
+            nvgFillColor(vg, nvgRGBA(255, 255, 255, 255))
+        elseif isActive then
+            nvgFillColor(vg, nvgRGBA(255, 255, 255, 255))
+        else
+            nvgFillColor(vg, nvgRGBA(150, 150, 160, 200))
+        end
+        nvgText(vg, kx, keysY, GRIND_KEYS[i], nil)
+    end
+    
+    -- 打磨次数
+    nvgFontFaceId(vg, fontId)
+    nvgFontSize(vg, 20)
+    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+    nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 255))
+    nvgText(vg, cx, cy - wheelR - 30, "打磨 × " .. grindCount_, nil)
+    
+    -- 倒计时（右上角）
+    if not grindDone_ then
+        local timeText = string.format("%.1f", remaining)
+        nvgFontSize(vg, 16)
+        nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
+        if remaining <= 1.0 then
+            nvgFillColor(vg, nvgRGBA(C_DANGER[1], C_DANGER[2], C_DANGER[3], 255))
+        else
+            nvgFillColor(vg, nvgRGBA(120, 130, 140, 200))
+        end
+        nvgText(vg, w - 16, 50, timeText .. "s", nil)
+    end
+    
+    -- 结果展示
+    if grindDone_ then
+        nvgBeginPath(vg)
+        nvgRoundedRect(vg, cx - 120, cy - 60, 240, 100, 12)
+        nvgFillColor(vg, nvgRGBA(20, 22, 28, 230))
+        nvgFill(vg)
+        nvgStrokeColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 150))
+        nvgStrokeWidth(vg, 2)
+        nvgStroke(vg)
+        
+        nvgFontFaceId(vg, fontId)
+        nvgFontSize(vg, 18)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+        nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 255))
+        nvgText(vg, cx, cy - 40, "砥砺完成!", nil)
+        
+        nvgFontSize(vg, 15)
+        local gradeText
+        local gr, gg, gb = 200, 205, 210
+        if grindScore_ >= 90 then
+            gradeText = "大师磨砺 " .. grindScore_ .. "分"
+            gr, gg, gb = 160, 140, 90
+        elseif grindScore_ >= 65 then
+            gradeText = "精细打磨 " .. grindScore_ .. "分"
+            gr, gg, gb = 80, 200, 120
+        elseif grindScore_ >= 40 then
+            gradeText = "粗磨完成 " .. grindScore_ .. "分"
+            gr, gg, gb = 120, 130, 140
+        else
+            gradeText = "草草了事 " .. grindScore_ .. "分"
+            gr, gg, gb = 240, 80, 80
+        end
+        nvgFillColor(vg, nvgRGBA(gr, gg, gb, 255))
+        nvgText(vg, cx, cy - 15, gradeText, nil)
+        
+        -- 攻速加成显示
+        local bonusPct = math.floor(grindScore_ / 100 * 30)
+        nvgFontSize(vg, 13)
+        nvgFillColor(vg, nvgRGBA(150, 200, 255, 220))
+        nvgText(vg, cx, cy + 10, "攻速 +" .. bonusPct .. "%", nil)
+        
+        nvgFontSize(vg, 12)
+        nvgFillColor(vg, nvgRGBA(120, 130, 140, 180))
+        nvgText(vg, cx, cy + 30, "锻造完毕，准备试炼...", nil)
+    else
+        -- 操作提示
+        nvgFontFaceId(vg, fontId)
+        nvgFontSize(vg, 13)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+        nvgFillColor(vg, nvgRGBA(120, 130, 140, 200))
+        nvgText(vg, cx, keysY + keyBoxW / 2 + 12, "依次按 J → K → L 完成一次打磨!", nil)
+    end
 end
 
 

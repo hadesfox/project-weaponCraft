@@ -41,11 +41,18 @@ Config.WeaponTypes = {
 
 -- 锻造配置
 Config.Forge = {
-    HammerDuration = 10.0,   -- 锤击阶段时长（秒）
+    HammerDuration = 5.0,    -- 锤击阶段时长（秒）
     QuenchDuration = 5.0,    -- 淬火阶段时长（秒）
     PerfectHalf = 0.10,      -- 完美判定区域半宽（占节奏条比例）
     GoodHalf = 0.40,         -- 良好判定区域半宽（占节奏条比例）
     ZoneMargin = 0.40,       -- 判定区域随机范围边距
+    GrindDuration = 3.0,     -- 砥砺阶段时长（秒）
+    GrindKeys = { "J", "K", "L" },  -- 砥砺按键序列
+    GrindScoreTable = {      -- 砥砺次数→得分映射
+        [0] = 10, [1] = 30, [2] = 50, [3] = 65,
+        [4] = 80, [5] = 90, [6] = 100,
+    },
+    GrindMaxCount = 6,       -- 超过此次数按满分计算
     FinishDelay = 1.5,       -- 锻造完成后延迟过渡（秒）
 }
 
@@ -84,15 +91,30 @@ Config.Trial = {
     EnemyImage = "image/红色史莱姆敌人_20260530132628.png",
 }
 
+-- ============================================================================
+-- 战斗系统配置
+-- ============================================================================
+Config.Combat = {
+    BaseHP = 1000,            -- 敌人基础血量
+    DummyHP = 9999,           -- 木桩血量（几乎无限）
+    HPBarWidth = 50,          -- 血条宽度（基础px，按physScale缩放）
+    HPBarHeight = 6,          -- 血条高度
+    HPBarOffsetY = -12,       -- 血条在目标头顶的偏移
+    DamageNumberDuration = 0.8,  -- 伤害数字显示时长
+}
+
 -- 武器攻击配置（每种武器的攻击招式）
+-- damage: 绝对伤害值（基于BaseHP=1000设计）
+-- 设计目标: 普通攻击6-7下击杀，重击3下击杀
 Config.Attacks = {
     SWORD = {
+        -- 均衡型：攻速与伤害平衡，连击流畅
         {
             name = "横斩",
             duration = 0.3,       -- 攻击持续时间（秒）
             range = 70,           -- 攻击范围（px）
             arc = 150,            -- 扫过弧度（度）
-            damage = 1.0,         -- 伤害倍率
+            damage = 150,         -- 伤害值
             knockback = 5,        -- 击退距离
             startAngle = -75,     -- 起始偏移角（相对面朝方向）
         },
@@ -101,19 +123,20 @@ Config.Attacks = {
             duration = 0.25,
             range = 60,
             arc = 100,
-            damage = 1.2,
+            damage = 110,
             knockback = 10,
             startAngle = 50,      -- 从下往上挑
             direction = -1,       -- 反向挥动
         },
     },
     AXE = {
+        -- 爆发型：慢速高伤，单发毁灭
         {
             name = "劈砍",
             duration = 0.5,       -- 慢但重
             range = 80,
             arc = 90,
-            damage = 2.0,
+            damage = 320,
             knockback = 15,
             startAngle = -45,
         },
@@ -122,18 +145,19 @@ Config.Attacks = {
             duration = 0.45,
             range = 90,
             arc = 200,            -- 超大范围扫
-            damage = 1.5,
+            damage = 220,
             knockback = 20,
             startAngle = -100,
         },
     },
     SPEAR = {
+        -- 风筝型：极快极远，持续输出
         {
             name = "突刺",
             duration = 0.2,       -- 极快
             range = 120,          -- 超远
             arc = 20,             -- 极窄（刺）
-            damage = 1.3,
+            damage = 130,
             knockback = 8,
             startAngle = -10,
             isThrust = true,      -- 突刺类攻击（特殊动画）
@@ -143,18 +167,19 @@ Config.Attacks = {
             duration = 0.4,
             range = 100,
             arc = 160,
-            damage = 1.0,
+            damage = 160,
             knockback = 12,
             startAngle = -80,
         },
     },
     SHIELD = {
+        -- 控制型：低伤高击退，安全输出
         {
             name = "盾击",
             duration = 0.3,
             range = 45,           -- 近身
             arc = 80,
-            damage = 0.8,
+            damage = 80,
             knockback = 25,       -- 超强击退
             startAngle = -40,
         },
@@ -163,7 +188,7 @@ Config.Attacks = {
             duration = 0.4,
             range = 55,
             arc = 60,
-            damage = 1.5,
+            damage = 120,
             knockback = 30,
             startAngle = -30,
             isCharge = true,      -- 冲撞（玩家前移）
@@ -171,12 +196,13 @@ Config.Attacks = {
         },
     },
     HOOK = {
+        -- 连击型：低单伤，拉近+360度高伤combo
         {
             name = "钩击",
             duration = 0.3,
             range = 100,          -- 长距
             arc = 40,             -- 窄弧
-            damage = 1.0,
+            damage = 70,
             knockback = -20,      -- 负数 = 拉近
             startAngle = -20,
         },
@@ -185,18 +211,19 @@ Config.Attacks = {
             duration = 0.5,
             range = 80,
             arc = 360,            -- 360 度全方位
-            damage = 0.8,
+            damage = 240,
             knockback = 5,
             startAngle = 0,
         },
     },
     UNKNOWN = {
+        -- 奇物：仅单招但素材加成最高
         {
             name = "挥击",
             duration = 0.35,
             range = 65,
             arc = 130,
-            damage = 1.0,
+            damage = 170,
             knockback = 8,
             startAngle = -65,
         },

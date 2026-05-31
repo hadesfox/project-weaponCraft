@@ -34,6 +34,8 @@ local player_ = {
 -- 输入状态
 local inputLeft_ = false
 local inputRight_ = false
+local inputDown_ = false
+local dropThrough_ = 0  -- 下落穿透计时器（秒），>0 时忽略平台碰撞
 
 -- ============================================================================
 -- 攻击系统
@@ -182,6 +184,8 @@ function TrialState.Enter(gameData, onComplete)
     -- 输入重置
     inputLeft_ = false
     inputRight_ = false
+    inputDown_ = false
+    dropThrough_ = 0
     
     -- 加载主角贴图（待机帧）
     playerImage_ = nvgCreateImage(NVG.Get(), Config.Trial.PlayerImage, 0)
@@ -468,7 +472,8 @@ RecalcPlatforms = function()
         height = dummyDef_.baseH * physScale_,
         hitAnim = dummy_ and dummy_.hitAnim or 0,
         hitDir = dummy_ and dummy_.hitDir or 0,
-        hp = 999,
+        hp = dummy_ and dummy_.hp or Config.Combat.DummyHP,
+        maxHp = Config.Combat.DummyHP,
     }
 end
 
@@ -508,6 +513,8 @@ SpawnTargets = function()
             size = size,
             hitRadius = (ry == 0) and (size * 0.8) or (size / 2),  -- 地面敌人碰撞半径匹配贴图宽度
             alive = true,
+            hp = Config.Combat.BaseHP,
+            maxHp = Config.Combat.BaseHP,
             hitAnim = 0,
             spawnAnim = 1.0,
             knockX = 0, knockY = 0,
@@ -681,6 +688,7 @@ end
 UpdateInput = function()
     inputLeft_ = input:GetKeyDown(KEY_A) or input:GetKeyDown(KEY_LEFT)
     inputRight_ = input:GetKeyDown(KEY_D) or input:GetKeyDown(KEY_RIGHT)
+    inputDown_ = input:GetKeyDown(KEY_S) or input:GetKeyDown(KEY_DOWN)
 end
 
 --- 玩家物理（横版重力）
@@ -716,8 +724,13 @@ UpdatePlayerPhysics = function(dt)
         player_.onGround = true
     end
     
-    -- 平台碰撞（仅下落时或静止站立时）
-    if player_.vy >= 0 then
+    -- 下落穿透计时器递减
+    if dropThrough_ > 0 then
+        dropThrough_ = dropThrough_ - dt
+    end
+    
+    -- 平台碰撞（仅下落时或静止站立时，穿透期间跳过）
+    if player_.vy >= 0 and dropThrough_ <= 0 then
         for i = 1, #platforms_ do
             local p = platforms_[i]
             local playerBottom = player_.y + player_.height
@@ -788,12 +801,21 @@ UpdatePlayerPhysics = function(dt)
     end
 end
 
---- 跳跃
+--- 跳跃（按住下键时从平台下落穿透）
 DoJump = function()
     if player_.onGround then
-        player_.vy = Config.Trial.JumpVelocity * physScale_
-        player_.onGround = false
-        player_.landSquash = 0  -- 跳跃时立刻取消着地动画
+        if inputDown_ and (player_.y + player_.height < groundY_ - 1) then
+            -- 站在平台上且按住下键 → 下落穿透
+            player_.y = player_.y + 2  -- 轻微下移脱离平台表面
+            player_.vy = 50 * physScale_  -- 给一个小的向下初速度
+            player_.onGround = false
+            dropThrough_ = 0.15  -- 150ms 内忽略平台碰撞
+        else
+            -- 正常跳跃
+            player_.vy = Config.Trial.JumpVelocity * physScale_
+            player_.onGround = false
+            player_.landSquash = 0  -- 跳跃时立刻取消着地动画
+        end
     end
 end
 
@@ -927,12 +949,15 @@ CheckDummyCollision = function(progress)
     if hit then
         dummy_.hitAnim = 1.0
         dummy_.hitDir = dir
-        -- 命中特效
+        -- 扣血
+        local dmg = atk.damage or 150
+        dummy_.hp = math.max(0, dummy_.hp - dmg)
+        -- 伤害数字
         hitEffects_[#hitEffects_ + 1] = {
-            x = dCx, y = dCy,
-            text = "Hit!",
-            timer = 0.8,
-            color = {200, 200, 200},
+            x = dCx, y = dCy - dummy_.height * 0.6,
+            text = "-" .. dmg,
+            timer = Config.Combat.DamageNumberDuration,
+            color = dmg >= 200 and Config.Colors.Danger or { 255, 200, 100 },
         }
     end
 end
@@ -950,27 +975,51 @@ GetThrustLength = function(progress)
     end
 end
 
---- 命中靶子
+--- 命中靶子（HP伤害系统）
 HitTarget = function(index, target, atk, dir)
     attackHitTargets_[index] = true
-    target.alive = false
-    target.hitAnim = 1.0
     
+    -- 计算伤害
+    local dmg = atk.damage or 150
+    target.hp = target.hp - dmg
+    target.hitAnim = 0.5  -- 受击闪烁
+    
+    -- 击退
     local kb = atk.knockback or 8
     target.knockX = dir * math.abs(kb)
     target.knockY = -math.abs(kb) * 0.5
     
-    combo_ = combo_ + 1
-    comboTimer_ = 0
-    local points = Config.Trial.ComboMultiplier * combo_
-    score_ = score_ + points
-    
+    -- 显示伤害数字
     hitEffects_[#hitEffects_ + 1] = {
-        x = target.x, y = target.y,
-        text = "+" .. points,
-        timer = 1.0,
-        color = combo_ >= 5 and Config.Colors.Gold or Config.Colors.Success,
+        x = target.x, y = target.y - (target.size or 30),
+        text = "-" .. dmg,
+        timer = Config.Combat.DamageNumberDuration,
+        color = dmg >= 200 and Config.Colors.Danger or { 255, 200, 100 },
     }
+    
+    -- 判定死亡
+    if target.hp <= 0 then
+        target.alive = false
+        target.hp = 0
+        target.hitAnim = 1.0
+        
+        -- 击杀奖励
+        combo_ = combo_ + 1
+        comboTimer_ = 0
+        local points = Config.Trial.ComboMultiplier * combo_
+        score_ = score_ + points
+        
+        hitEffects_[#hitEffects_ + 1] = {
+            x = target.x, y = target.y - (target.size or 30) - 20,
+            text = "+" .. points,
+            timer = 1.0,
+            color = combo_ >= 5 and Config.Colors.Gold or Config.Colors.Success,
+        }
+    else
+        -- 未击杀时也增加连击
+        combo_ = combo_ + 1
+        comboTimer_ = 0
+    end
 end
 
 --- 点到线段距离
@@ -1209,7 +1258,9 @@ function TrialState.Render(vg)
     Renderer.RenderPlatforms(vg, S)
     Renderer.RenderGround(vg, S)
     Renderer.RenderTargets(vg, S)
+    Renderer.RenderTargetHPBars(vg, S)
     Renderer.RenderDummy(vg, S)
+    Renderer.RenderDummyHPBar(vg, S)
     Renderer.RenderDummyWeapon(vg, S)
     Renderer.RenderAttack(vg, S)
     Renderer.RenderWeaponClash(vg, S)

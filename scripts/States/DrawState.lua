@@ -50,6 +50,7 @@ function DrawState.BuildUI()
     canvasAreaPanel_ = UI.Panel {
         width = "100%",
         flexGrow = 1,
+        flexShrink = 1,
         pointerEvents = "none",
     }
     return UI.Panel {
@@ -59,6 +60,7 @@ function DrawState.BuildUI()
             UI.Panel {
                 width = "100%",
                 flexDirection = "row",
+                flexShrink = 0,
                 justifyContent = "space-between",
                 alignItems = "center",
                 padding = 12,
@@ -101,6 +103,7 @@ function DrawState.BuildUI()
                 width = "100%",
                 padding = 12,
                 gap = 10,
+                flexShrink = 0,
                 alignItems = "center",
                 backgroundColor = Config.Colors.BgDark,
                 children = {
@@ -184,21 +187,72 @@ function DrawState.FinishDrawing()
     if onComplete_ then onComplete_() end
 end
 
---- 更新：从 UI 布局动态获取画布区域
+--- 根据屏幕尺寸直接计算画布位置（不依赖 UI 布局）
+local function CalcCanvasBounds()
+    local dpr = graphics:GetDPR()
+    local logW = graphics:GetWidth() / dpr
+    local logH = graphics:GetHeight() / dpr
+    
+    -- 预估工具栏和底栏高度
+    local topBarH = 50
+    local bottomBarH = 110
+    
+    -- 可用绘制区域
+    local areaX = 0
+    local areaY = topBarH
+    local areaW = logW
+    local areaH = logH - topBarH - bottomBarH
+    
+    -- 正方形画布，取可用宽高较小值的 88%
+    local size = math.min(areaW * 0.88, areaH * 0.88)
+    size = math.max(size, 150)
+    
+    -- 居中放置
+    local cx = areaX + (areaW - size) / 2
+    local cy = areaY + (areaH - size) / 2
+    
+    return cx, cy, size
+end
+
+--- 更新：每帧计算画布位置
 function DrawState.Update(dt)
-    if not canvasBoundsReady_ and canvasAreaPanel_ then
+    -- 优先使用 UI 布局面板的准确坐标
+    local areaX, areaY, areaW, areaH
+    local layoutOK = false
+    
+    if canvasAreaPanel_ then
         local layout = canvasAreaPanel_:GetAbsoluteLayout()
         if layout and layout.w > 0 and layout.h > 0 then
-            -- 在面板区域内居中放置正方形画布
-            local size = math.min(layout.w * 0.92, layout.h * 0.92)
-            size = math.max(size, 150)
-            canvasSize_ = size
-            canvasScreenX_ = layout.x + (layout.w - size) / 2
-            canvasScreenY_ = layout.y + (layout.h - size) / 2
-            Canvas.SetBounds(canvasScreenX_, canvasScreenY_, size, size)
-            canvasBoundsReady_ = true
-            print("[DrawState] Canvas bounds from layout: " .. canvasScreenX_ .. "," .. canvasScreenY_ .. " size=" .. size)
+            areaX = layout.x
+            areaY = layout.y
+            areaW = layout.w
+            areaH = layout.h
+            layoutOK = true
         end
+    end
+    
+    local newX, newY, size
+    if layoutOK then
+        size = math.min(areaW * 0.92, areaH * 0.92)
+        size = math.max(size, 150)
+        newX = areaX + (areaW - size) / 2
+        newY = areaY + (areaH - size) / 2
+    else
+        -- Fallback: 直接根据屏幕尺寸计算
+        newX, newY, size = CalcCanvasBounds()
+    end
+    
+    -- 更新画布位置
+    if math.abs(canvasSize_ - size) > 0.5 or math.abs(canvasScreenX_ - newX) > 0.5 or math.abs(canvasScreenY_ - newY) > 0.5 or not canvasBoundsReady_ then
+        canvasSize_ = size
+        canvasScreenX_ = newX
+        canvasScreenY_ = newY
+        Canvas.SetBounds(canvasScreenX_, canvasScreenY_, size, size)
+        if not canvasBoundsReady_ then
+            print(string.format("[DrawState] Canvas init: x=%.0f y=%.0f size=%.0f layout=%s",
+                newX, newY, size, tostring(layoutOK)))
+        end
+        canvasBoundsReady_ = true
     end
 end
 
@@ -294,7 +348,10 @@ function DrawState.Render(vg)
     ))
     nvgFill(vg)
     
-    Canvas.Render(vg, canvasScreenX_, canvasScreenY_)
+    -- 仅在布局就绪后渲染画布
+    if canvasBoundsReady_ then
+        Canvas.Render(vg, canvasScreenX_, canvasScreenY_)
+    end
     
     nvgResetTransform(vg)
     nvgEndFrame(vg)

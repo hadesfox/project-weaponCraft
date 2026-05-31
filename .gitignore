@@ -1,16 +1,2 @@
 .build/
 dist/
-.tmp/
-logs/
-.agent/
-.claude/
-.cli/
-.project/
-.emmylua/
-engine-docs/
-examples/
-templates/
-urhox-libs/
-schemas/
-tools/
-*.meta

@@ -1,0 +1,17 @@
+{
+  "skill_name": "generate-spine",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "帮我生成一个4帧的小猫走路帧动画，像素风格，用在我的2D游戏里",
+      "expected_output": "应该生成4帧透明背景的像素风小猫走路图片，然后打包为Spine资产，并提供UI.Spine加载代码",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我已经有6张角色攻击动作的图片在 assets/Textures/ 目录下(attack_1.png到attack_6.png)，每张256x256，帮我打包成Spine帧动画",
+      "expected_output": "应该生成打包脚本，CONFIG.frames 指向用户的6张图片，然后执行生成文件，给出 UI.Spine 使用代码",
+      "files": []
+    }
+  ]
+}
