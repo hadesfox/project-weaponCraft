@@ -1190,7 +1190,7 @@ RenderQuenchPhase = function(vg, w, h)
     nvgFill(vg)
     
     nvgFontFaceId(vg, fontId)
-    nvgFontSize(vg, math.min(32, countdownR * 1.8) * pulseScale)
+    nvgFontSize(vg, math.floor(math.min(32, countdownR * 1.8) * pulseScale))
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(vg, nvgRGBA(255, 255, 255, 255))
     if quenchDone_ then

@@ -567,7 +567,7 @@ local function RenderIronGate(vg, cx, cy, gateW, gateH, crackLevel, scale)
         local fontId = NVG.GetFont()
         if fontId ~= -1 then
             nvgFontFaceId(vg, fontId)
-            local fontSize = math.min(hw * 1.4, hh * 0.7) * 2
+            local fontSize = math.floor(math.min(hw * 1.4, hh * 0.7) * 2)
             nvgFontSize(vg, fontSize)
             nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
             -- 底层阴影（凿刻深度感）
@@ -589,7 +589,7 @@ local function RenderIronGate(vg, cx, cy, gateW, gateH, crackLevel, scale)
     local fontId = NVG.GetFont()
     if fontId ~= -1 then
         nvgFontFaceId(vg, fontId)
-        nvgFontSize(vg, 11 * scale)
+        nvgFontSize(vg, math.floor(11 * scale))
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
         nvgFillColor(vg, nvgRGBA(140, 130, 120, 180))
         nvgText(vg, 0, hh + 14 * scale, "阶段" .. (currentPhase_ > 0 and tostring(currentPhase_) or ""), nil)

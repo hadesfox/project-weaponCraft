@@ -599,7 +599,7 @@ function Renderer.RenderHitEffects(vg, S)
     for i = 1, #S.hitEffects do
         local e = S.hitEffects[i]
         local alpha = math.floor(e.timer * 255)
-        local size = 14 + (1 - e.timer) * 4
+        local size = math.floor(14 + (1 - e.timer) * 4)
         nvgFontSize(vg, size)
         nvgFillColor(vg, nvgRGBA(e.color[1], e.color[2], e.color[3], alpha))
         nvgText(vg, e.x, e.y, e.text, nil)
@@ -618,7 +618,7 @@ function Renderer.RenderCombo(vg, S)
     nvgFontFaceId(vg, fontId)
     local size = math.min(32, 16 + S.combo * 2)
     local pulse = 1.0 + math.sin(S.comboTimer * 8) * 0.08
-    nvgFontSize(vg, size * pulse)
+    nvgFontSize(vg, math.floor(size * pulse))
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
 
     local alpha = math.floor(255 * math.max(0, 1.0 - S.comboTimer / Config.Trial.ComboDecayTime))
