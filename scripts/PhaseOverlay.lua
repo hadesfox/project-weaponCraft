@@ -367,8 +367,10 @@ function PhaseOverlay.Update(dt)
             local dpr = graphics:GetDPR()
             local lw = graphics:GetWidth() / dpr
             local lh = graphics:GetHeight() / dpr
-            local cx = 50
-            local cy = lh * 0.5
+            local gateW = lw * 0.12
+            local gateH = lh * 0.55
+            local cx = gateW * 0.55
+            local cy = lh * 0.48
             local intensity = (5 - transition_.phase) / 4
 
             if transition_.phase == 0 then
@@ -377,8 +379,6 @@ function PhaseOverlay.Update(dt)
                 finalShatter_.active = true
                 finalShatter_.timer = 0
                 -- 生成铁门碎片
-                local gateW = 70
-                local gateH = lh * 0.55
                 SpawnGateShards(cx, cy, gateW, gateH)
                 SpawnFragments(cx, cy, 40, 2.0)
             else
@@ -618,10 +618,10 @@ function PhaseOverlay.Render(vg)
     -- 1. 渲染左侧竞技场铁门
     -- ========================================
     if currentPhase_ >= 1 and not shatterTriggered_ then
-        local gateX = 44
-        local gateY = lh * 0.5
-        local gateW = 60
-        local gateH = math.min(lh * 0.45, 180)
+        local gateW = lw * 0.12            -- 宽度占屏幕12%（自适应）
+        local gateH = lh * 0.55            -- 高度占屏幕55%（更大更有压迫感）
+        local gateX = gateW * 0.55         -- 左侧居中偏移
+        local gateY = lh * 0.48            -- 垂直略偏上
         -- crackLevel: 0(阶段5完好) → 4(阶段1极碎)
         local crackLevel = 5 - currentPhase_
 
@@ -642,10 +642,10 @@ function PhaseOverlay.Render(vg)
     -- ========================================
     if finalShatter_.active then
         local t = finalShatter_.timer / finalShatter_.duration  -- 0→1
-        local gateX = 44
-        local gateY = lh * 0.5
-        local gateW = 60
-        local gateH = math.min(lh * 0.45, 180)
+        local gateW = lw * 0.12
+        local gateH = lh * 0.55
+        local gateX = gateW * 0.55
+        local gateY = lh * 0.48
 
         -- 前30%: 门向中心放大+震动
         if t < 0.3 then

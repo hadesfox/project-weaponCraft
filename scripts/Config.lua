@@ -97,11 +97,12 @@ Config.Trial = {
 -- ============================================================================
 Config.Combat = {
     BaseHP = 1000,            -- 敌人基础血量
-    DummyHP = 9999,           -- 木桩血量（几乎无限）
+    DummyHP = 1250,           -- 锻造师血量
     HPBarWidth = 50,          -- 血条宽度（基础px，按physScale缩放）
     HPBarHeight = 6,          -- 血条高度
     HPBarOffsetY = -12,       -- 血条在目标头顶的偏移
     DamageNumberDuration = 0.8,  -- 伤害数字显示时长
+    TrialTimeLimit = 30,      -- 试炼场时间限制（秒）
 }
 
 -- 武器攻击配置（每种武器的攻击招式）

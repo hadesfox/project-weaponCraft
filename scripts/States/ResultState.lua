@@ -85,6 +85,8 @@ GenerateWeaponData = function()
         def = base.def and math.floor(base.def * multiplier) or 0,
         score = score,
         isComposite = gameData_.isComposite,
+        form1Type = gameData_.form1Type,  -- 变形武器形态1独立分类
+        form2Type = gameData_.form2Type,  -- 变形武器形态2独立分类
     }
     
     -- 复合武器特殊属性

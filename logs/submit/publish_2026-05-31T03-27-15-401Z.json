@@ -1,0 +1,32 @@
+{
+  "startTime": "2026-05-31T03:27:15.401Z",
+  "endTime": "2026-05-31T03:27:28.540Z",
+  "duration": "13139ms",
+  "result": {
+    "success": false,
+    "error": "assets 缺少 promotional_image 字段。\n宣传图 (banner) 是发布到 TapTap 的必需资源，请在 assets 中配置 promotional_image 路径。"
+  },
+  "steps": [
+    {
+      "time": "2026-05-31T03:27:15.562Z",
+      "stage": "upload_to_cdn",
+      "data": {
+        "status": "start"
+      }
+    },
+    {
+      "time": "2026-05-31T03:27:28.537Z",
+      "stage": "upload_to_cdn",
+      "data": {
+        "status": "done"
+      }
+    },
+    {
+      "time": "2026-05-31T03:27:28.538Z",
+      "stage": "network_config",
+      "data": {
+        "env": "production"
+      }
+    }
+  ]
+}

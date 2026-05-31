@@ -8,6 +8,10 @@ local Slime = require("Trial.Slime")
 
 local Renderer = {}
 
+-- 试炼场背景图
+local BG_IMAGE_PATH = "image/kzpncvhk5eq10kyyiudqnhs-20260531125017.png"
+local bgImage_ = nil
+
 -- 锻造师贴图（木桩替代）
 local DUMMY_IMAGE_PATH = "image/主角_锻造师_20260530003547.png"
 local dummyImage_ = nil
@@ -29,25 +33,48 @@ local function GetThrustLength(progress, attackRange, physScale)
     end
 end
 
---- 背景渐变
+--- 预加载所有图片资源（在 Enter 时调用，避免渲染时卡顿）
+--- @param vg userdata
+function Renderer.Preload(vg)
+    if not bgImage_ then
+        bgImage_ = nvgCreateImage(vg, BG_IMAGE_PATH, 0)
+    end
+    if not dummyImage_ then
+        dummyImage_ = nvgCreateImage(vg, DUMMY_IMAGE_PATH, 0)
+        if dummyImage_ and dummyImage_ > 0 then
+            local iw = IntVector2()
+            local ih = IntVector2()
+            nvgImageSize(vg, dummyImage_, iw, ih)
+            if ih.x > 0 then
+                dummyImageAspect_ = iw.x / ih.x
+            end
+        end
+    end
+end
+
+--- 背景图
 --- @param vg userdata
 --- @param S table 共享状态表
 function Renderer.RenderBackground(vg, S)
-    local bgPaint = nvgLinearGradient(vg, 0, 0, 0, S.screenH,
-        nvgRGBA(20, 22, 28, 255),
-        nvgRGBA(50, 50, 55, 255))
-    nvgBeginPath(vg)
-    nvgRect(vg, 0, 0, S.screenW, S.screenH)
-    nvgFillPaint(vg, bgPaint)
-    nvgFill(vg)
+    -- 已在 Preload 中加载，这里仅做兜底
+    if not bgImage_ then
+        bgImage_ = nvgCreateImage(vg, BG_IMAGE_PATH, 0)
+    end
 
-    -- 远景星星
-    nvgFillColor(vg, nvgRGBA(255, 255, 255, 60))
-    for i = 1, 8 do
+    if bgImage_ and bgImage_ > 0 then
+        local imgPaint = nvgImagePattern(vg, 0, 0, S.screenW, S.screenH, 0, bgImage_, 1.0)
         nvgBeginPath(vg)
-        local sx = (i * 97 + 30) % math.floor(S.screenW)
-        local sy = (i * 53 + 10) % math.floor(S.screenH * 0.5)
-        nvgCircle(vg, sx, sy, 1.5)
+        nvgRect(vg, 0, 0, S.screenW, S.screenH)
+        nvgFillPaint(vg, imgPaint)
+        nvgFill(vg)
+    else
+        -- 加载失败时的备用渐变
+        local bgPaint = nvgLinearGradient(vg, 0, 0, 0, S.screenH,
+            nvgRGBA(20, 22, 28, 255),
+            nvgRGBA(50, 50, 55, 255))
+        nvgBeginPath(vg)
+        nvgRect(vg, 0, 0, S.screenW, S.screenH)
+        nvgFillPaint(vg, bgPaint)
         nvgFill(vg)
     end
 end
@@ -112,12 +139,7 @@ function Renderer.RenderTargets(vg, S)
 
             if S.enemyImage and S.enemyImage ~= 0 then
                 local def = S.targetDefs[i]
-                local standY
-                if def and def.isGround then
-                    standY = S.groundY
-                else
-                    standY = S.groundY - S.groundY * (def and def.platformRy or 0)
-                end
+                local standY = S.groundY - S.groundY * (def and def.platformRy or 0)
                 local imgY = standY - imgH * 0.80
                 local imgPaint = nvgImagePattern(vg, tx - imgW / 2, imgY, imgW, imgH, 0, S.enemyImage, 1.0)
                 nvgBeginPath(vg)
@@ -175,15 +197,25 @@ function Renderer.RenderDummy(vg, S)
         shakeX = math.sin(S.dummy.hitAnim * 20) * 4 * S.dummy.hitAnim * S.dummy.hitDir
     end
 
-    -- 用锻造师贴图渲染
+    -- 用锻造师贴图渲染（朝向跟随攻击方向）
     if dummyImage_ and dummyImage_ ~= 0 then
-        local imgX = dx - dw / 2 + shakeX
-        local imgY = dy - dh
-        local imgPat = nvgImagePattern(vg, imgX, imgY, dw, dh, 0, dummyImage_, 1.0)
+        nvgSave(vg)
+        -- 以脚底中心为锚点，翻转朝向
+        local anchorX = dx + shakeX
+        local anchorY = dy
+        nvgTranslate(vg, anchorX, anchorY)
+        -- 贴图原始朝左，dummyFacingRight 时翻转
+        if S.dummyFacingRight then
+            nvgScale(vg, -1, 1)
+        end
+        local drawX = -dw / 2
+        local drawY = -dh
+        local imgPat = nvgImagePattern(vg, drawX, drawY, dw, dh, 0, dummyImage_, 1.0)
         nvgBeginPath(vg)
-        nvgRect(vg, imgX, imgY, dw, dh)
+        nvgRect(vg, drawX, drawY, dw, dh)
         nvgFillPaint(vg, imgPat)
         nvgFill(vg)
+        nvgRestore(vg)
     else
         -- 贴图加载失败时的 fallback：简单矩形
         nvgBeginPath(vg)

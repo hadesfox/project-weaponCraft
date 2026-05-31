@@ -68,7 +68,43 @@ function Analyzer.Analyze(strokes)
     result.isComposite = DetectComposite(strokes, result)
     
     -- 武器类型识别
-    result.type = ClassifyWeapon(result, strokes)
+    if result.isComposite then
+        -- 变形武器：将笔画拆分为两组，分别独立判定类型
+        local closedStrokes = {}
+        local openStrokes = {}
+        for i = 1, #strokes do
+            if strokes[i].closed then
+                closedStrokes[#closedStrokes + 1] = strokes[i]
+            else
+                openStrokes[#openStrokes + 1] = strokes[i]
+            end
+        end
+        
+        -- 按奇偶分组（与 TrialState.PrepareWeaponStrokes 一致）
+        local group1, group2 = {}, {}
+        for i = 1, #closedStrokes do
+            if i % 2 == 1 then
+                group1[#group1 + 1] = closedStrokes[i]
+            else
+                group2[#group2 + 1] = closedStrokes[i]
+            end
+        end
+        -- 开放笔画作为连接件，两组都包含以提供上下文
+        for i = 1, #openStrokes do
+            group1[#group1 + 1] = openStrokes[i]
+            group2[#group2 + 1] = openStrokes[i]
+        end
+        
+        -- 分别分类
+        result.form1Type = Analyzer.ClassifySubset(group1)
+        result.form2Type = Analyzer.ClassifySubset(group2)
+        -- 整体类型取 form1 作为主类型
+        result.type = result.form1Type
+        
+        print("[Analyzer] Composite! Form1: " .. result.form1Type .. " | Form2: " .. result.form2Type)
+    else
+        result.type = ClassifyWeapon(result, strokes)
+    end
     
     local wr, ws = ComputeWidthProfile(strokes)
     print("[Analyzer] Type: " .. result.type 
@@ -319,6 +355,41 @@ ClassifyWeapon = function(result, strokes)
     end
     
     return "UNKNOWN"
+end
+
+--- 对一组笔画独立做武器类型分类（供变形武器子组使用）
+---@param strokes table[] 笔画子集
+---@return string 武器类型
+function Analyzer.ClassifySubset(strokes)
+    if not strokes or #strokes == 0 then return "UNKNOWN" end
+
+    -- 构造与 Analyze 类似的 mini result
+    local allMinX, allMinY = math.huge, math.huge
+    local allMaxX, allMaxY = -math.huge, -math.huge
+    local closedCount = 0
+
+    for i = 1, #strokes do
+        local pts = strokes[i].points
+        if strokes[i].closed then closedCount = closedCount + 1 end
+        for j = 1, #pts do
+            allMinX = math.min(allMinX, pts[j].x)
+            allMinY = math.min(allMinY, pts[j].y)
+            allMaxX = math.max(allMaxX, pts[j].x)
+            allMaxY = math.max(allMaxY, pts[j].y)
+        end
+    end
+
+    local totalW = math.max(1, allMaxX - allMinX)
+    local totalH = math.max(1, allMaxY - allMinY)
+
+    local miniResult = {
+        aspectRatio = totalH / totalW,
+        pointCount = CountSharpPoints(strokes),
+        closedCount = closedCount,
+        shapeCount = #strokes,
+    }
+
+    return ClassifyWeapon(miniResult, strokes)
 end
 
 return Analyzer

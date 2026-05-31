@@ -181,9 +181,12 @@ function DrawState.FinishDrawing()
     local analysis = Analyzer.Analyze(strokes)
     gameData_.weaponType = analysis.type
     gameData_.isComposite = analysis.isComposite
+    gameData_.form1Type = analysis.form1Type  -- 变形武器形态1类型
+    gameData_.form2Type = analysis.form2Type  -- 变形武器形态2类型
     gameData_.analysis = analysis
     
-    print("[DrawState] Done. Type: " .. analysis.type .. " Composite: " .. tostring(analysis.isComposite))
+    print("[DrawState] Done. Type: " .. analysis.type .. " Composite: " .. tostring(analysis.isComposite)
+        .. (analysis.form1Type and (" Form1: " .. analysis.form1Type .. " Form2: " .. analysis.form2Type) or ""))
     
     if onComplete_ then onComplete_() end
 end

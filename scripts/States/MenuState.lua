@@ -15,11 +15,15 @@ local MenuState = {}
 local HitTestButtons
 local HitTestSecret
 local HitTestSettings
+local HitTestLeaderboard
 local ToggleBackground
 local RenderBackground
 local RenderButtons
 local RenderCharacterPanel
 local RenderSettingsPanel
+local RenderLeaderboardPanel
+local FetchMenuLeaderboard
+local BuildMenuLeaderboardRows
 local SplitLines
 
 -- 回调
@@ -61,6 +65,12 @@ local charPanelAnim_ = 0    -- 面板展开动画 (0→1)
 -- 已点击开始游戏（隐藏所有菜单内容，只渲染纯黑）
 local gameStarted_ = false
 
+-- 排行榜面板状态
+local showLeaderboard_ = false
+local leaderboardAnim_ = 0      -- 面板展开动画 (0→1)
+local menuLeaderboardData_ = {} -- 排行榜数据
+local menuLeaderboardLoading_ = false
+
 -- 设置面板状态
 local showSettings_ = false
 local settingsAnim_ = 0     -- 面板展开动画 (0→1)
@@ -70,6 +80,9 @@ local rebindFlash_ = 0      -- 重绑定闪烁动画
 
 -- 设置触发点（铁砧上的盾牌图标）
 local SETTINGS_ZONE = { rx = 0.545, ry = 0.67, rw = 0.05, rh = 0.08 }
+
+-- 排行榜触发点（左上角旗帜/盾牌区域）
+local LEADERBOARD_ZONE = { rx = 0.05, ry = 0.02, rw = 0.14, rh = 0.35 }
 
 -- 角色数据
 local characters_ = {
@@ -123,6 +136,10 @@ function MenuState.Enter(onStart)
     settingsScroll_ = 0
     rebindingAction_ = nil
     rebindFlash_ = 0
+    showLeaderboard_ = false
+    leaderboardAnim_ = 0
+    menuLeaderboardData_ = {}
+    menuLeaderboardLoading_ = false
 end
 
 --- 离开菜单状态
@@ -168,6 +185,10 @@ function MenuState.Update(dt)
     local targetSettings = showSettings_ and 1.0 or 0.0
     settingsAnim_ = settingsAnim_ + (targetSettings - settingsAnim_) * dt * 8
 
+    -- 排行榜面板动画
+    local targetLb = showLeaderboard_ and 1.0 or 0.0
+    leaderboardAnim_ = leaderboardAnim_ + (targetLb - leaderboardAnim_) * dt * 8
+
     -- 重绑定闪烁
     if rebindingAction_ then
         rebindFlash_ = rebindFlash_ + dt * 6
@@ -200,6 +221,13 @@ function MenuState.OnKeyDown(key)
         return
     end
 
+    if showLeaderboard_ then
+        if key == KEY_ESCAPE then
+            showLeaderboard_ = false
+        end
+        return
+    end
+
     if key == KEY_ESCAPE then
         if showCharPanel_ then
             showCharPanel_ = false
@@ -225,6 +253,12 @@ function MenuState.OnMouseDown(button)
         return
     end
 
+    -- 排行榜面板打开时，点击关闭
+    if showLeaderboard_ then
+        showLeaderboard_ = false
+        return
+    end
+
     if showCharPanel_ then
         -- 点击关闭面板
         showCharPanel_ = false
@@ -234,6 +268,13 @@ function MenuState.OnMouseDown(button)
     -- 隐藏触发点检测（优先于按钮）
     if HitTestSecret(mx, my) then
         ToggleBackground()
+        return
+    end
+
+    -- 排行榜触发点
+    if HitTestLeaderboard(mx, my) then
+        showLeaderboard_ = true
+        FetchMenuLeaderboard()
         return
     end
 
@@ -277,7 +318,7 @@ function MenuState.OnMouseUp(button)
 end
 
 function MenuState.OnMouseMove()
-    if showCharPanel_ or showSettings_ then
+    if showCharPanel_ or showSettings_ or showLeaderboard_ then
         hoverIndex_ = 0
         return
     end
@@ -295,6 +336,12 @@ function MenuState.OnTouchBegin(x, y)
         return
     end
 
+    -- 排行榜面板打开时，点击关闭
+    if showLeaderboard_ then
+        showLeaderboard_ = false
+        return
+    end
+
     if showCharPanel_ then
         showCharPanel_ = false
         return
@@ -303,6 +350,13 @@ function MenuState.OnTouchBegin(x, y)
     -- 隐藏触发点检测（优先于按钮）
     if HitTestSecret(tx, ty) then
         ToggleBackground()
+        return
+    end
+
+    -- 排行榜触发点
+    if HitTestLeaderboard(tx, ty) then
+        showLeaderboard_ = true
+        FetchMenuLeaderboard()
         return
     end
 
@@ -399,6 +453,11 @@ function MenuState.Render(vg)
     -- 设置面板
     if settingsAnim_ > 0.01 then
         RenderSettingsPanel(vg)
+    end
+
+    -- 排行榜面板
+    if leaderboardAnim_ > 0.01 then
+        RenderLeaderboardPanel(vg)
     end
 
     nvgResetTransform(vg)
@@ -808,6 +867,185 @@ RenderSettingsPanel = function(vg)
     nvgFontSize(vg, 12)
     nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.7)))
     nvgText(vg, screenW_ / 2, py + panelH - 12, "点击按键框修改 · ESC 关闭", nil)
+
+    nvgRestore(vg)
+end
+
+-- ============================================================================
+-- 排行榜面板
+-- ============================================================================
+
+--- 命中测试：排行榜触发点（左上角旗帜区域）
+HitTestLeaderboard = function(mx, my)
+    local sx = screenW_ * LEADERBOARD_ZONE.rx
+    local sy = screenH_ * LEADERBOARD_ZONE.ry
+    local sw = screenW_ * LEADERBOARD_ZONE.rw
+    local sh = screenH_ * LEADERBOARD_ZONE.rh
+    return mx >= sx and mx <= sx + sw and my >= sy and my <= sy + sh
+end
+
+--- 拉取排行榜数据
+FetchMenuLeaderboard = function()
+    if menuLeaderboardLoading_ then return end
+    menuLeaderboardLoading_ = true
+    menuLeaderboardData_ = {}
+    local cjson = require("cjson")
+
+    clientCloud:Get("leaderboard_history", {
+        ok = function(values)
+            local history = {}
+            if values and values.leaderboard_history then
+                local ok2, decoded = pcall(cjson.decode, values.leaderboard_history)
+                if ok2 and type(decoded) == "table" then
+                    history = decoded
+                end
+            end
+            table.sort(history, function(a, b)
+                if a.time ~= b.time then return a.time < b.time end
+                return a.damage < b.damage
+            end)
+            print("[MenuState] Leaderboard fetched from history, count=" .. #history)
+            menuLeaderboardData_ = history
+            menuLeaderboardLoading_ = false
+        end,
+        error = function(code, reason)
+            print("[MenuState] Leaderboard error: " .. tostring(reason))
+            menuLeaderboardData_ = {}
+            menuLeaderboardLoading_ = false
+        end,
+    })
+end
+
+--- 渲染排行榜面板
+RenderLeaderboardPanel = function(vg)
+    local alpha = math.floor(leaderboardAnim_ * 255)
+    local panelScale = 0.85 + leaderboardAnim_ * 0.15
+
+    -- 半透明遮罩
+    nvgBeginPath(vg)
+    nvgRect(vg, 0, 0, screenW_, screenH_)
+    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(leaderboardAnim_ * 180)))
+    nvgFill(vg)
+
+    -- 面板尺寸
+    local panelW = math.min(screenW_ * 0.75, 400)
+    local panelH = math.min(screenH_ * 0.8, 420)
+    local px = (screenW_ - panelW) / 2
+    local py = (screenH_ - panelH) / 2
+
+    nvgSave(vg)
+    nvgTranslate(vg, screenW_ / 2, screenH_ / 2)
+    nvgScale(vg, panelScale, panelScale)
+    nvgTranslate(vg, -screenW_ / 2, -screenH_ / 2)
+
+    -- 面板背景
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, px, py, panelW, panelH, 14)
+    nvgFillColor(vg, nvgRGBA(20, 22, 28, alpha))
+    nvgFill(vg)
+    nvgStrokeColor(vg, nvgRGBA(160, 140, 90, math.floor(alpha * 0.6)))
+    nvgStrokeWidth(vg, 1.5)
+    nvgStroke(vg)
+
+    local fontId = NVG.GetFont()
+    if fontId == -1 then
+        nvgRestore(vg)
+        return
+    end
+    nvgFontFaceId(vg, fontId)
+
+    -- 标题
+    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+    nvgFontSize(vg, 20)
+    nvgFillColor(vg, nvgRGBA(160, 140, 90, alpha))
+    nvgText(vg, screenW_ / 2, py + 16, "排行榜", nil)
+
+    -- 分割线
+    nvgBeginPath(vg)
+    nvgMoveTo(vg, px + 20, py + 44)
+    nvgLineTo(vg, px + panelW - 20, py + 44)
+    nvgStrokeColor(vg, nvgRGBA(80, 80, 90, math.floor(alpha * 0.5)))
+    nvgStrokeWidth(vg, 1)
+    nvgStroke(vg)
+
+    -- 列标题
+    local contentX = px + 20
+    local contentW = panelW - 40
+    local headerY = py + 52
+
+    nvgFontSize(vg, 12)
+    nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
+    nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.8)))
+    nvgText(vg, contentX, headerY, "排名", nil)
+    nvgText(vg, contentX + 40, headerY, "玩家", nil)
+    nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
+    nvgText(vg, contentX + contentW, headerY, "用时 / 伤害", nil)
+
+    -- 内容区
+    local rowY = headerY + 22
+    local rowH = 28
+
+    if menuLeaderboardLoading_ then
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+        nvgFontSize(vg, 14)
+        nvgFillColor(vg, nvgRGBA(150, 160, 170, alpha))
+        nvgText(vg, screenW_ / 2, rowY + 20, "加载中...", nil)
+    elseif #menuLeaderboardData_ == 0 then
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+        nvgFontSize(vg, 14)
+        nvgFillColor(vg, nvgRGBA(150, 160, 170, alpha))
+        nvgText(vg, screenW_ / 2, rowY + 20, "暂无数据", nil)
+    else
+        for i, item in ipairs(menuLeaderboardData_) do
+            local y = rowY + (i - 1) * rowH
+            if y + rowH > py + panelH - 40 then break end
+
+            local t = item.time or 0
+            local d = item.damage or 0
+            local name = item.name or "未知"
+
+            -- 排名颜色
+            local rankColor
+            if i == 1 then
+                rankColor = { 255, 215, 0, alpha }     -- 金
+            elseif i == 2 then
+                rankColor = { 200, 200, 210, alpha }   -- 银
+            elseif i == 3 then
+                rankColor = { 205, 127, 50, alpha }    -- 铜
+            else
+                rankColor = { 180, 185, 195, alpha }
+            end
+
+            -- 行背景（交替）
+            if i % 2 == 0 then
+                nvgBeginPath(vg)
+                nvgRoundedRect(vg, contentX - 4, y - 2, contentW + 8, rowH, 4)
+                nvgFillColor(vg, nvgRGBA(40, 42, 50, math.floor(alpha * 0.4)))
+                nvgFill(vg)
+            end
+
+            -- 排名
+            nvgFontSize(vg, 14)
+            nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
+            nvgFillColor(vg, nvgRGBA(rankColor[1], rankColor[2], rankColor[3], rankColor[4]))
+            nvgText(vg, contentX, y + 4, "#" .. i, nil)
+
+            -- 玩家名
+            nvgFillColor(vg, nvgRGBA(200, 205, 210, alpha))
+            nvgText(vg, contentX + 40, y + 4, name, nil)
+
+            -- 用时和伤害
+            nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
+            nvgFillColor(vg, nvgRGBA(160, 170, 180, math.floor(alpha * 0.9)))
+            nvgText(vg, contentX + contentW, y + 4, t .. "秒 " .. d .. "伤害", nil)
+        end
+    end
+
+    -- 底部提示
+    nvgFontSize(vg, 11)
+    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
+    nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.7)))
+    nvgText(vg, screenW_ / 2, py + panelH - 10, "点击任意位置关闭", nil)
 
     nvgRestore(vg)
 end

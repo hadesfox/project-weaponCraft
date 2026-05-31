@@ -91,8 +91,8 @@ local dummyCurrentAttack_ = nil
 local dummyAttackCooldown_ = 0       -- 攻击间隔冷却
 local dummyAttackProgress_ = 0       -- 当前攻击进度 0~1
 local dummyFacingRight_ = false      -- 木桩面朝方向（朝向玩家）
-local DUMMY_ATTACK_INTERVAL_MIN = 1.5  -- 最短攻击间隔（秒）
-local DUMMY_ATTACK_INTERVAL_MAX = 3.5  -- 最长攻击间隔（秒）
+local DUMMY_ATTACK_INTERVAL_MIN = 0.8  -- 最短攻击间隔（秒）
+local DUMMY_ATTACK_INTERVAL_MAX = 1.8  -- 最长攻击间隔（秒）
 local dummyHitPlayer_ = false        -- 本次攻击是否已命中玩家
 
 -- 武器碰撞系统
@@ -140,6 +140,23 @@ local uiRoot_ = nil
 -- 敌人贴图
 local enemyImage_ = nil
 
+-- ============================================================================
+-- 试炼场计时与结算系统
+-- ============================================================================
+local trialTimer_ = 0              -- 已消耗时间（秒）
+local trialTimeLimit_ = 60         -- 时间限制
+local trialTotalDamage_ = 0        -- 累计对锻造师造成的伤害
+local trialEnded_ = false          -- 试炼是否已结束
+local trialEndReason_ = ""         -- 结束原因: "kill" / "timeout"
+local attackHitDummy_ = false      -- 当前攻击是否已命中锻造师（防止重复伤害）
+
+-- 结算 UI 状态
+local showEndScreen_ = false       -- 是否显示结算画面
+local endScreenPhase_ = "input"    -- "input" / "submitting" / "leaderboard"
+local playerInputId_ = ""          -- 玩家输入的ID
+local leaderboardData_ = {}        -- 排行榜数据
+local myRank_ = nil                -- 我的排名
+
 -- 内部函数前向声明
 local PrepareWeaponStrokes
 local SetupTransformSystem
@@ -172,6 +189,10 @@ local CheckDummyAttackHitPlayer
 local CheckWeaponClash
 local GetPlayerWeaponCollider
 local UpdateWeaponClash
+local ShowEndScreen
+local SubmitScore
+local FetchLeaderboard
+local BuildLeaderboardUI
 
 --- 进入试炼状态
 function TrialState.Enter(gameData, onComplete)
@@ -225,11 +246,31 @@ function TrialState.Enter(gameData, onComplete)
     comboTimer_ = 0
     hitEffects_ = {}
     
+    -- 初始化试炼计时系统
+    trialTimer_ = 0
+    trialTimeLimit_ = Config.Combat.TrialTimeLimit
+    trialTotalDamage_ = 0
+    trialEnded_ = false
+    trialEndReason_ = ""
+    attackHitDummy_ = false
+    showEndScreen_ = false
+    endScreenPhase_ = "input"
+    playerInputId_ = ""
+    leaderboardData_ = {}
+    myRank_ = nil
+    
     -- 输入重置
     inputLeft_ = false
     inputRight_ = false
     inputDown_ = false
     dropThrough_ = 0
+    
+    -- 预加载资源到引擎缓存（WASM 平台避免首帧网络下载卡顿）
+    cache:GetResource("Texture2D", "image/kzpncvhk5eq10kyyiudqnhs-20260531125017.png")
+    cache:GetResource("Texture2D", Config.Trial.PlayerImage)
+    cache:GetResource("Texture2D", Config.Trial.EnemyImage)
+    -- 预加载渲染器 NanoVG 图片句柄
+    Renderer.Preload(NVG.Get())
     
     -- 加载主角贴图（待机帧）
     playerImage_ = nvgCreateImage(NVG.Get(), Config.Trial.PlayerImage, 0)
@@ -383,19 +424,22 @@ SetupTransformSystem = function()
     transformAnim_ = 0
     
     if isComposite_ then
-        -- 形态一：主武器类型
-        formAttacks_[1] = Config.Attacks[weaponType] or Config.Attacks.UNKNOWN
-        formNames_[1] = (Config.WeaponTypes[weaponType] or Config.WeaponTypes.UNKNOWN).name
+        -- 变形武器：使用独立分类的两种子武器类型
+        local type1 = gameData_.weaponData.form1Type or weaponType
+        local type2 = gameData_.weaponData.form2Type or GetComplementaryType(weaponType)
         
-        -- 形态二：根据主类型确定互补类型
-        local secondType = GetComplementaryType(weaponType)
-        formAttacks_[2] = Config.Attacks[secondType] or Config.Attacks.UNKNOWN
-        formNames_[2] = (Config.WeaponTypes[secondType] or Config.WeaponTypes.UNKNOWN).name
+        -- 形态一
+        formAttacks_[1] = Config.Attacks[type1] or Config.Attacks.UNKNOWN
+        formNames_[1] = (Config.WeaponTypes[type1] or Config.WeaponTypes.UNKNOWN).name
+        
+        -- 形态二
+        formAttacks_[2] = Config.Attacks[type2] or Config.Attacks.UNKNOWN
+        formNames_[2] = (Config.WeaponTypes[type2] or Config.WeaponTypes.UNKNOWN).name
         
         -- 默认使用形态一
         attacks_ = formAttacks_[1]
         
-        print("[TrialState] Composite! Form1: " .. formNames_[1] .. " Form2: " .. formNames_[2])
+        print("[TrialState] Composite! Form1: " .. type1 .. " (" .. formNames_[1] .. ") Form2: " .. type2 .. " (" .. formNames_[2] .. ")")
     else
         -- 非复合：只有一种攻击组
         attacks_ = Config.Attacks[weaponType] or Config.Attacks.UNKNOWN
@@ -528,36 +572,36 @@ SpawnTargets = function()
     targets_ = {}
     targetDefs_ = {}
     local arenaH = groundY_
-    
+
+    -- 随机选择不重复的平台索引，让敌人只刷新在平台上
+    local platIndices = {}
+    for i = 1, #platformDefs_ do
+        platIndices[#platIndices + 1] = i
+    end
+    -- Fisher-Yates 洗牌
+    for i = #platIndices, 2, -1 do
+        local j = math.random(1, i)
+        platIndices[i], platIndices[j] = platIndices[j], platIndices[i]
+    end
+
     for i = 1, Config.Trial.TargetCount do
         local baseSize = Config.Trial.TargetMinSize + math.random() * (Config.Trial.TargetMaxSize - Config.Trial.TargetMinSize)
         local size = baseSize * physScale_
-        local rx, ry
-        if i <= #platformDefs_ and math.random() > 0.3 then
-            local pdef = platformDefs_[i]
-            rx = pdef.rx + pdef.rw / 2 + (math.random() - 0.5) * 0.04
-            ry = pdef.ry + size / arenaH + 0.01
-        else
-            -- 地面敌人：直接贴地（ry=0 表示站在地面线上）
-            rx = 0.05 + math.random() * 0.9
-            ry = 0
-        end
-        -- platformRy: 该敌人所站平台的 ry（用于渲染贴地），地面敌人为 0
-        local platformRy = 0
-        if ry ~= 0 and i <= #platformDefs_ then
-            platformRy = platformDefs_[i].ry
-        end
-        targetDefs_[i] = { rx = rx, ry = ry, baseSize = baseSize, isGround = (ry == 0), platformRy = platformRy }
+
+        -- 所有敌人都放在平台上
+        local platIdx = platIndices[((i - 1) % #platIndices) + 1]
+        local pdef = platformDefs_[platIdx]
+        local rx = pdef.rx + pdef.rw / 2 + (math.random() - 0.5) * 0.04
+        local ry = pdef.ry + size / arenaH + 0.01
+        local platformRy = pdef.ry
+
+        targetDefs_[i] = { rx = rx, ry = ry, baseSize = baseSize, isGround = false, platformRy = platformRy }
         local ty = groundY_ - arenaH * ry
-        -- 地面敌人：碰撞中心对齐贴图视觉中心（贴图可见区域中心在地面线上方 size*0.8）
-        if ry == 0 then
-            ty = groundY_ - size * 0.8
-        end
         targets_[i] = {
             x = screenW_ * rx,
             y = ty,
             size = size,
-            hitRadius = (ry == 0) and (size * 0.8) or (size / 2),  -- 地面敌人碰撞半径匹配贴图宽度
+            hitRadius = size / 2,
             alive = true,
             hp = Config.Combat.BaseHP,
             maxHp = Config.Combat.BaseHP,
@@ -577,14 +621,10 @@ RecalcTargets = function()
             local def = targetDefs_[i]
             local size = def.baseSize * physScale_
             local ty = groundY_ - arenaH * def.ry
-            -- 地面敌人：碰撞中心对齐贴图视觉中心
-            if def.isGround then
-                ty = groundY_ - size * 0.8
-            end
             targets_[i].x = screenW_ * def.rx
             targets_[i].y = ty
             targets_[i].size = size
-            targets_[i].hitRadius = def.isGround and (size * 0.8) or (size / 2)
+            targets_[i].hitRadius = size / 2
         end
     end
 end
@@ -647,6 +687,25 @@ function TrialState.BuildUI()
                                 text = "招式: " .. (attacks_[1] and attacks_[1].name or "-"),
                                 fontSize = 10,
                                 fontColor = { 160, 200, 255, 200 },
+                            },
+                        },
+                    },
+                    -- 中间：倒计时 + 伤害
+                    UI.Panel {
+                        flexDirection = "row", gap = 10,
+                        alignItems = "center",
+                        children = {
+                            UI.Label {
+                                id = "trialTimerLabel",
+                                text = string.format("%02d", trialTimeLimit_),
+                                fontSize = 20,
+                                fontColor = Config.Colors.TextLight,
+                            },
+                            UI.Label {
+                                id = "trialDmgLabel",
+                                text = "伤害:0",
+                                fontSize = 12,
+                                fontColor = { 255, 180, 100, 220 },
                             },
                         },
                     },
@@ -716,6 +775,25 @@ end
 -- ============================================================================
 
 function TrialState.Update(dt)
+    -- 试炼已结束，只更新特效动画
+    if trialEnded_ then
+        UpdateHitEffects(dt)
+        UpdateHUD()
+        return
+    end
+    
+    -- 更新倒计时
+    trialTimer_ = trialTimer_ + dt
+    if trialTimer_ >= trialTimeLimit_ then
+        trialTimer_ = trialTimeLimit_
+        trialEnded_ = true
+        trialEndReason_ = "timeout"
+        attacking_ = false
+        currentAttack_ = nil
+        ShowEndScreen()
+        return
+    end
+    
     UpdateInput()
     UpdatePlayerPhysics(dt)
     UpdateAttack(dt)
@@ -737,6 +815,7 @@ function TrialState.Update(dt)
             local burnDmg = math.floor(Config.Combat.DummyHP * 0.02)
             dummy_.hp = math.max(0, dummy_.hp - burnDmg)
             dummy_.hitAnim = 0.3
+            trialTotalDamage_ = trialTotalDamage_ + burnDmg
             hitEffects_[#hitEffects_ + 1] = {
                 x = dummy_.x + math.random(-10, 10),
                 y = dummy_.y - (dummy_.height or 60) * 0.5,
@@ -749,6 +828,16 @@ function TrialState.Update(dt)
                 dummy_.hp = 0
             end
         end
+    end
+    
+    -- 检测锻造师血量归零
+    if dummy_ and dummy_.hp <= 0 and not trialEnded_ then
+        trialEnded_ = true
+        trialEndReason_ = "kill"
+        attacking_ = false
+        currentAttack_ = nil
+        ShowEndScreen()
+        return
     end
     
     UpdateHUD()
@@ -903,6 +992,7 @@ end
 StartAttack = function(index)
     if attacking_ then return end
     if #attacks_ == 0 then return end
+    if trialEnded_ then return end  -- 试炼结束后不可攻击
     
     local idx = index or 1
     if idx > #attacks_ then idx = 1 end
@@ -916,6 +1006,7 @@ StartAttack = function(index)
     local totalSpeedMod = speedBonus + materialSpdMod_
     attackDuration_ = currentAttack_.duration * (1.0 - totalSpeedMod)
     attackHitTargets_ = {}
+    attackHitDummy_ = false  -- 新攻击重置木桩命中标记
 end
 
 --- 攻击更新
@@ -1000,7 +1091,7 @@ end
 --- 检测木桩碰撞
 CheckDummyCollision = function(progress)
     if not dummy_ or not currentAttack_ then return end
-    if dummy_.hitAnim > 0.5 then return end  -- 受击冷却中
+    if attackHitDummy_ then return end  -- 本次攻击已命中，不再重复判定
     
     local atk = currentAttack_
     local dir = player_.facingRight and 1 or -1
@@ -1030,11 +1121,14 @@ CheckDummyCollision = function(progress)
     end
     
     if hit then
+        attackHitDummy_ = true  -- 标记本次攻击已命中
         dummy_.hitAnim = 1.0
         dummy_.hitDir = dir
-        -- 扣血
-        local dmg = atk.damage or 150
+        -- 扣血（应用材质攻击力修正 + 成长加成）
+        local baseDmg = atk.damage or 150
+        local dmg = math.floor(baseDmg * (1.0 + materialAtkMod_) * (1.0 + growthBonus_))
         dummy_.hp = math.max(0, dummy_.hp - dmg)
+        trialTotalDamage_ = trialTotalDamage_ + dmg
         -- 伤害数字
         hitEffects_[#hitEffects_ + 1] = {
             x = dCx, y = dCy - dummy_.height * 0.6,
@@ -1042,6 +1136,10 @@ CheckDummyCollision = function(progress)
             timer = Config.Combat.DamageNumberDuration,
             color = dmg >= 200 and Config.Colors.Danger or { 255, 200, 100 },
         }
+        -- 连击
+        combo_ = combo_ + 1
+        comboTimer_ = 0
+        score_ = score_ + Config.Trial.ComboMultiplier * combo_
     end
 end
 
@@ -1222,6 +1320,343 @@ UpdateHUD = function()
     local attackLabel = uiRoot_:FindById("trialAttackLabel")
     if attackLabel and currentAttack_ then
         attackLabel:SetText("招式: " .. currentAttack_.name)
+    end
+    
+    -- 倒计时
+    local timerLabel = uiRoot_:FindById("trialTimerLabel")
+    if timerLabel then
+        local remaining = math.max(0, math.ceil(trialTimeLimit_ - trialTimer_))
+        timerLabel:SetText(string.format("%02d", remaining))
+        if remaining <= 10 then
+            timerLabel:SetFontColor({ 240, 80, 80, 255 })
+        end
+    end
+    
+    -- 累计伤害
+    local dmgLabel = uiRoot_:FindById("trialDmgLabel")
+    if dmgLabel then
+        dmgLabel:SetText("伤害:" .. trialTotalDamage_)
+    end
+end
+
+-- ============================================================================
+-- 结算画面
+-- ============================================================================
+
+--- 显示结算画面（替换 UI 为结算面板）
+--- 左侧：击败信息 + 玩家输入提交
+--- 右侧：排行榜
+ShowEndScreen = function()
+    showEndScreen_ = true
+    endScreenPhase_ = "input"
+    playerInputId_ = ""
+
+    -- 计算用时（秒，取整）
+    local timeUsed = math.ceil(trialTimer_)
+    local reasonText = trialEndReason_ == "kill" and "锻造师被击败!" or "时间到!"
+    local borderColor = trialEndReason_ == "kill" and Config.Colors.Gold or { 200, 80, 80, 255 }
+
+    -- 左侧：结算信息 + 名字输入
+    local inputField = UI.TextField {
+        id = "endPlayerInput",
+        placeholder = "输入你的昵称",
+        value = "",
+        maxLength = 12,
+        width = "100%",
+        height = 36,
+        fontSize = 14,
+        onChange = function(self, val)
+            playerInputId_ = val
+        end,
+    }
+
+    local submitBtn = UI.Button {
+        id = "endSubmitBtn",
+        text = "提交成绩",
+        variant = "primary",
+        width = "100%",
+        onClick = function(self)
+            if #playerInputId_ == 0 then return end
+            self:SetDisabled(true)
+            endScreenPhase_ = "submitting"
+            SubmitScore(timeUsed)
+        end,
+    }
+
+    local leftPanel = UI.Panel {
+        flex = 1,
+        padding = 20, gap = 12,
+        backgroundColor = { 30, 32, 42, 255 },
+        borderRadius = 14,
+        borderWidth = 2,
+        borderColor = borderColor,
+        alignItems = "center",
+        justifyContent = "center",
+        children = {
+            -- 标题
+            UI.Label {
+                text = reasonText,
+                fontSize = 20,
+                fontColor = trialEndReason_ == "kill" and Config.Colors.Gold or { 240, 100, 100, 255 },
+            },
+            -- 战绩信息
+            UI.Panel {
+                width = "100%", gap = 6,
+                children = {
+                    UI.Panel {
+                        width = "100%", flexDirection = "row", justifyContent = "space-between",
+                        children = {
+                            UI.Label { text = "用时", fontSize = 14, fontColor = { 160, 170, 180, 255 } },
+                            UI.Label { text = timeUsed .. " 秒", fontSize = 14, fontColor = Config.Colors.TextLight },
+                        },
+                    },
+                    UI.Panel {
+                        width = "100%", flexDirection = "row", justifyContent = "space-between",
+                        children = {
+                            UI.Label { text = "总伤害", fontSize = 14, fontColor = { 160, 170, 180, 255 } },
+                            UI.Label { text = tostring(trialTotalDamage_), fontSize = 14, fontColor = { 255, 180, 80, 255 } },
+                        },
+                    },
+                    UI.Panel {
+                        width = "100%", flexDirection = "row", justifyContent = "space-between",
+                        children = {
+                            UI.Label { text = "最高连击", fontSize = 14, fontColor = { 160, 170, 180, 255 } },
+                            UI.Label { text = tostring(combo_), fontSize = 14, fontColor = Config.Colors.Secondary },
+                        },
+                    },
+                },
+            },
+            -- 分割线
+            UI.Panel { width = "80%", height = 1, backgroundColor = { 60, 60, 70, 150 } },
+            -- 输入昵称
+            UI.Label {
+                text = "输入你的名字上榜:",
+                fontSize = 12,
+                fontColor = { 140, 150, 160, 220 },
+            },
+            inputField,
+            submitBtn,
+            -- 返回菜单按钮
+            UI.Button {
+                text = "返回菜单",
+                size = "small",
+                variant = "outline",
+                marginTop = 8,
+                width = "100%",
+                onClick = function()
+                    if onComplete_ then onComplete_() end
+                end,
+            },
+        },
+    }
+
+    -- 右侧：排行榜
+    local leaderboardPanel = UI.Panel {
+        id = "endLeaderboard",
+        width = "100%",
+        gap = 4,
+        children = {},
+    }
+
+    local rightPanel = UI.Panel {
+        flex = 1,
+        padding = 20, gap = 10,
+        backgroundColor = { 25, 28, 38, 255 },
+        borderRadius = 14,
+        borderWidth = 1,
+        borderColor = { 80, 80, 100, 180 },
+        children = {
+            UI.Label {
+                text = "排行榜 (用时优先)",
+                fontSize = 16,
+                fontColor = Config.Colors.Gold,
+                marginBottom = 6,
+            },
+            leaderboardPanel,
+        },
+    }
+
+    local endRoot = UI.Panel {
+        width = "100%", height = "100%",
+        backgroundColor = { 10, 12, 20, 230 },
+        justifyContent = "center",
+        alignItems = "center",
+        padding = 20,
+        children = {
+            UI.Panel {
+                width = "100%", maxWidth = 700,
+                height = "90%", maxHeight = 420,
+                flexDirection = "row",
+                gap = 16,
+                children = {
+                    leftPanel,
+                    rightPanel,
+                },
+            },
+        },
+    }
+
+    -- 替换整个 UI
+    uiRoot_ = endRoot
+    UI.SetRoot(uiRoot_)
+
+    -- 立即拉取排行榜数据显示在右侧
+    FetchLeaderboard()
+end
+
+--- 提交分数到云排行榜
+--- 排序规则：用时少优先(升序)，同时间伤害高优先
+--- 使用复合分数: compositeScore = timeUsed * 100000 + (99999 - clampedDamage)
+--- 这样升序排列时 → 时间小的在前；同时间伤害高的在前
+SubmitScore = function(timeUsed)
+    local cjson = require("cjson")
+
+    -- 新记录
+    local newEntry = {
+        name = playerInputId_,
+        time = timeUsed,
+        damage = trialTotalDamage_,
+        ts = os.time(),
+    }
+
+    -- 先拉取已有排行榜历史
+    clientCloud:Get("leaderboard_history", {
+        ok = function(values)
+            local history = {}
+            if values and values.leaderboard_history then
+                local ok2, decoded = pcall(cjson.decode, values.leaderboard_history)
+                if ok2 and type(decoded) == "table" then
+                    history = decoded
+                end
+            end
+            -- 追加新记录
+            history[#history + 1] = newEntry
+            -- 按复合分数排序（用时优先，伤害越少越好）
+            table.sort(history, function(a, b)
+                if a.time ~= b.time then return a.time < b.time end
+                return a.damage < b.damage
+            end)
+            -- 保留前 50 条
+            if #history > 50 then
+                local trimmed = {}
+                for i = 1, 50 do trimmed[i] = history[i] end
+                history = trimmed
+            end
+            -- 存回云端
+            clientCloud:Set("leaderboard_history", cjson.encode(history), {
+                ok = function()
+                    print("[TrialState] Leaderboard history saved, count=" .. #history)
+                    leaderboardData_ = history
+                    BuildLeaderboardUI()
+                end,
+                error = function(code, reason)
+                    print("[TrialState] Save leaderboard error: " .. tostring(reason))
+                    leaderboardData_ = history
+                    BuildLeaderboardUI()
+                end,
+            })
+        end,
+        error = function(code, reason)
+            print("[TrialState] Get history error: " .. tostring(reason))
+            -- 无法拉取旧数据，直接存新记录
+            local history = { newEntry }
+            clientCloud:Set("leaderboard_history", cjson.encode(history), {
+                ok = function()
+                    leaderboardData_ = history
+                    BuildLeaderboardUI()
+                end,
+                error = function()
+                    leaderboardData_ = history
+                    BuildLeaderboardUI()
+                end,
+            })
+        end,
+    })
+end
+
+--- 拉取排行榜数据
+FetchLeaderboard = function()
+    endScreenPhase_ = "leaderboard"
+    local cjson = require("cjson")
+
+    clientCloud:Get("leaderboard_history", {
+        ok = function(values)
+            local history = {}
+            if values and values.leaderboard_history then
+                local ok2, decoded = pcall(cjson.decode, values.leaderboard_history)
+                if ok2 and type(decoded) == "table" then
+                    history = decoded
+                end
+            end
+            -- 排序
+            table.sort(history, function(a, b)
+                if a.time ~= b.time then return a.time < b.time end
+                return a.damage < b.damage
+            end)
+            print("[TrialState] Leaderboard fetched from history, count=" .. #history)
+            leaderboardData_ = history
+            BuildLeaderboardUI()
+        end,
+        error = function(code, reason)
+            print("[TrialState] Leaderboard fetch error: " .. tostring(reason))
+            leaderboardData_ = {}
+            BuildLeaderboardUI()
+        end,
+    })
+end
+
+--- 构建排行榜 UI 内容
+BuildLeaderboardUI = function()
+    local panel = uiRoot_ and uiRoot_:FindById("endLeaderboard")
+    if not panel then return end
+
+    -- 清空并重建
+    local children = {}
+
+    if #leaderboardData_ == 0 then
+        children[#children + 1] = UI.Label {
+            text = "暂无数据",
+            fontSize = 12,
+            fontColor = { 120, 120, 130, 180 },
+        }
+    else
+        -- 显示前 10 条
+        local showCount = math.min(10, #leaderboardData_)
+        for i = 1, showCount do
+            local item = leaderboardData_[i]
+            local name = item.name or "未知"
+            local t = item.time or 0
+            local d = item.damage or 0
+            local isMe = (name == playerInputId_)
+
+            local rowColor = isMe and { 255, 220, 100, 255 } or { 200, 205, 210, 220 }
+            children[#children + 1] = UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                paddingLeft = 4, paddingRight = 4,
+                paddingTop = 3, paddingBottom = 3,
+                backgroundColor = isMe and { 60, 55, 30, 100 } or { 0, 0, 0, 0 },
+                borderRadius = 4,
+                children = {
+                    UI.Label {
+                        text = "#" .. i .. " " .. name,
+                        fontSize = 11,
+                        fontColor = rowColor,
+                    },
+                    UI.Label {
+                        text = t .. "秒 " .. d .. "伤害",
+                        fontSize = 11,
+                        fontColor = { 160, 170, 180, 200 },
+                    },
+                },
+            }
+        end
+    end
+
+    panel:ClearChildren()
+    for _, child in ipairs(children) do
+        panel:AddChild(child)
     end
 end
 
@@ -1458,8 +1893,8 @@ UpdateDummyAttack = function(dt)
     dummyAttackTimer_ = 0
     dummyAttackProgress_ = 0
     dummyHitPlayer_ = false
-    -- 木桩攻击稍慢于玩家（1.3倍持续时间）
-    dummyAttackDuration_ = dummyCurrentAttack_.duration * 1.3
+    -- 木桩攻击速度与玩家接近
+    dummyAttackDuration_ = dummyCurrentAttack_.duration * 1.0
 end
 
 --- 检测木桩攻击是否命中玩家
