@@ -13,11 +13,12 @@ local ResultState = require("States.ResultState")
 local TrialState = require("States.TrialState")
 local MenuState = require("States.MenuState")
 local PhaseOverlay = require("PhaseOverlay")
+local KeyBindings = require("KeyBindings")
 
 -- ============================================================================
 -- BGM 系统
 -- ============================================================================
-local BGM = {}
+BGM = {}
 local bgmScene_ = nil
 local bgmNode_ = nil
 local bgmPrepSource_ = nil   -- 战前准备音乐
@@ -28,6 +29,7 @@ local bgmPrepBaseGain_ = 0.35  -- 战前准备基础音量（低于音效）
 local bgmPrepTargetGain_ = 0.35
 local bgmPrepCurrentGain_ = 0.35
 local bgmDuckGain_ = 0.15      -- 音效播放时压低到的音量
+local bgmDuckTimer_ = 0        -- 短暂压低计时器（>0 时处于压低状态）
 local bgmBattleGain_ = 0.55    -- 试炼场战斗音量
 
 function BGM.Init()
@@ -115,11 +117,26 @@ end
 --- 恢复战前准备音乐音量
 function BGM.UnduckPrep()
     bgmPrepTargetGain_ = bgmPrepBaseGain_
+    bgmDuckTimer_ = 0
+end
+
+--- 短暂压低战前准备音乐（音效播放时调用，duration 秒后自动恢复）
+function BGM.DuckForSFX(duration)
+    bgmPrepTargetGain_ = bgmDuckGain_
+    bgmDuckTimer_ = duration or 0.5
 end
 
 --- 平滑更新音量（每帧调用）
 function BGM.Update(dt)
     if not bgmPrepSource_ then return end
+    -- 短暂压低计时器：到期自动恢复
+    if bgmDuckTimer_ > 0 then
+        bgmDuckTimer_ = bgmDuckTimer_ - dt
+        if bgmDuckTimer_ <= 0 then
+            bgmDuckTimer_ = 0
+            bgmPrepTargetGain_ = bgmPrepBaseGain_
+        end
+    end
     -- 平滑过渡准备音乐音量
     if math.abs(bgmPrepCurrentGain_ - bgmPrepTargetGain_) > 0.001 then
         local speed = 3.0  -- 音量过渡速度
@@ -130,6 +147,194 @@ function BGM.Update(dt)
         end
         bgmPrepSource_.gain = bgmPrepCurrentGain_
     end
+end
+
+-- ============================================================================
+-- 开场动画系统
+-- ============================================================================
+local Intro = {}
+local introActive_ = false        -- 是否正在播放开场动画
+local introPlayer_ = nil          -- VideoPlayer 实例
+local introNvgImage_ = nil        -- NanoVG 视频纹理句柄
+local introFadeAlpha_ = 0         -- 淡入淡出 alpha (0~1)
+local introPhase_ = "none"        -- "fadein" | "playing" | "fadeout" | "none"
+local introOnDone_ = nil          -- 完成后的回调
+local introSkipHintAlpha_ = 0     -- "按ESC跳过" 提示文字透明度
+
+local INTRO_VIDEO_PATH = "video/开场动画.mp4"
+local INTRO_FADE_IN_TIME = 0.4
+local INTRO_FADE_OUT_TIME = 0.5
+local introTimer_ = 0
+
+function Intro.Start(onDone)
+    introOnDone_ = onDone
+    introActive_ = true
+    introPhase_ = "fadein"
+    introTimer_ = 0
+    introFadeAlpha_ = 0
+    introSkipHintAlpha_ = 0
+    introNvgImage_ = nil
+
+    -- 创建 VideoPlayer
+    introPlayer_ = VideoPlayer:new()
+    if introPlayer_ then
+        local success = introPlayer_:Load(INTRO_VIDEO_PATH, 1280, 720)
+        if success then
+            introPlayer_:SetVolume(1.0)
+            introPlayer_:SetLoop(false)
+            print("[Intro] Video loaded: " .. INTRO_VIDEO_PATH)
+        else
+            print("[Intro] Video load failed, skipping intro")
+            Intro.Finish()
+            return
+        end
+    else
+        print("[Intro] VideoPlayer not available, skipping intro")
+        Intro.Finish()
+        return
+    end
+end
+
+function Intro.Skip()
+    if not introActive_ then return end
+    print("[Intro] Skipped by user")
+    introPhase_ = "fadeout"
+    introTimer_ = 0
+end
+
+function Intro.Finish()
+    -- 清理视频资源
+    if introPlayer_ then
+        introPlayer_:Stop()
+        introPlayer_ = nil
+    end
+    introNvgImage_ = nil
+    introActive_ = false
+    introPhase_ = "none"
+
+    -- 执行回调
+    if introOnDone_ then
+        local cb = introOnDone_
+        introOnDone_ = nil
+        cb()
+    end
+end
+
+function Intro.Update(dt)
+    if not introActive_ then return end
+
+    introTimer_ = introTimer_ + dt
+
+    if introPhase_ == "fadein" then
+        introFadeAlpha_ = math.min(1.0, introTimer_ / INTRO_FADE_IN_TIME)
+        if introTimer_ >= INTRO_FADE_IN_TIME then
+            introPhase_ = "playing"
+            introTimer_ = 0
+            introFadeAlpha_ = 1.0
+            -- 开始播放视频
+            if introPlayer_ then
+                introPlayer_:Play()
+            end
+        end
+    elseif introPhase_ == "playing" then
+        -- 更新视频帧
+        if introPlayer_ then
+            introPlayer_:Update()
+            -- 检测视频是否播放完毕
+            local duration = introPlayer_:GetDuration()
+            local current = introPlayer_:GetCurrentTime()
+            if duration > 0 and current >= duration - 0.1 then
+                introPhase_ = "fadeout"
+                introTimer_ = 0
+            end
+        end
+        -- ESC跳过提示渐入（2秒后显示）
+        if introTimer_ > 2.0 then
+            introSkipHintAlpha_ = math.min(1.0, introSkipHintAlpha_ + dt * 2.0)
+        end
+    elseif introPhase_ == "fadeout" then
+        introFadeAlpha_ = math.max(0, 1.0 - introTimer_ / INTRO_FADE_OUT_TIME)
+        if introTimer_ >= INTRO_FADE_OUT_TIME then
+            Intro.Finish()
+        end
+    end
+end
+
+function Intro.Render(vg)
+    if not introActive_ then return end
+
+    local w = graphics:GetWidth()
+    local h = graphics:GetHeight()
+    local dpr = graphics:GetDPR()
+    local lw = w / dpr
+    local lh = h / dpr
+
+    -- 黑色背景
+    nvgBeginPath(vg)
+    nvgRect(vg, 0, 0, lw, lh)
+    nvgFillColor(vg, nvgRGBA(0, 0, 0, 255))
+    nvgFill(vg)
+
+    -- 渲染视频画面（带 fade alpha）
+    if introPlayer_ and introPlayer_:IsReady() and introPhase_ == "playing" then
+        local texture = introPlayer_:GetTexture()
+        if texture then
+            if not introNvgImage_ and nvgCreateVideo then
+                introNvgImage_ = nvgCreateVideo(vg, texture)
+            end
+            if introNvgImage_ and introNvgImage_ > 0 then
+                local videoW = introPlayer_:GetVideoWidth()
+                local videoH = introPlayer_:GetVideoHeight()
+                -- Aspect fit
+                local containerRatio = lw / lh
+                local videoRatio = (videoW > 0 and videoH > 0) and (videoW / videoH) or (16 / 9)
+                local drawW, drawH
+                if videoRatio > containerRatio then
+                    drawW = lw
+                    drawH = lw / videoRatio
+                else
+                    drawH = lh
+                    drawW = lh * videoRatio
+                end
+                local drawX = (lw - drawW) / 2
+                local drawY = (lh - drawH) / 2
+
+                local imgPaint = nvgImagePattern(vg, drawX, drawY, drawW, drawH, 0, introNvgImage_, introFadeAlpha_)
+                nvgBeginPath(vg)
+                nvgRect(vg, drawX, drawY, drawW, drawH)
+                nvgFillPaint(vg, imgPaint)
+                nvgFill(vg)
+            end
+        end
+    elseif introPhase_ == "fadein" then
+        -- fadein 阶段仅显示黑屏（已在上面绘制）
+    end
+
+    -- "按 ESC 跳过" 提示（右下角）
+    if introSkipHintAlpha_ > 0.01 then
+        local fontId = NVG.GetFont()
+        if fontId ~= -1 then
+            nvgFontFaceId(vg, fontId)
+            nvgFontSize(vg, 14)
+            nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_BOTTOM)
+            local a = math.floor(introSkipHintAlpha_ * 160)
+            nvgFillColor(vg, nvgRGBA(200, 200, 200, a))
+            nvgText(vg, lw - 24, lh - 20, "按 ESC 跳过", nil)
+        end
+    end
+end
+
+function Intro.IsActive()
+    return introActive_
+end
+
+function Intro.OnKeyDown(key)
+    if not introActive_ then return false end
+    if key == KEY_ESCAPE then
+        Intro.Skip()
+        return true
+    end
+    return true  -- 吞掉所有按键
 end
 
 -- ============================================================================
@@ -167,7 +372,10 @@ function Start()
     -- 2. 初始化共享 NanoVG 上下文（游戏自定义绘制用，只创建一次）
     NVG.Init()
     
-    -- 3. 初始化阶段倒数系统
+    -- 3. 初始化按键绑定系统
+    KeyBindings.Init()
+    
+    -- 4. 初始化阶段倒数系统
     PhaseOverlay.Init()
     
     -- 4. 初始化 BGM 系统
@@ -258,7 +466,10 @@ local function DoSwitchState(newState)
     if newState == Config.States.MENU then
         BGM.StopAll()  -- 返回菜单时停止所有BGM
         MenuState.Enter(function()
-            SwitchState(Config.States.DRAW)
+            -- 点击开始游戏 → 先播放开场动画 → 再进入绘制
+            Intro.Start(function()
+                SwitchState(Config.States.DRAW)
+            end)
         end)
         uiRoot_ = MenuState.BuildUI()
         UI.SetRoot(uiRoot_)
@@ -274,9 +485,7 @@ local function DoSwitchState(newState)
         end)
         BuildMaterialUI()
     elseif newState == Config.States.FORGE then
-        BGM.DuckPrep()  -- 锻造阶段有密集音效，压低BGM音量
         ForgeState.Enter(gameData_, function()
-            BGM.UnduckPrep()  -- 锻造结束，恢复BGM音量
             SwitchState(Config.States.RESULT)
         end, function(forgePhase)
             -- ForgeState 内部阶段切换回调（非阻塞，只播放音效和碎片）
@@ -421,6 +630,12 @@ end
 function HandleUpdate(eventType, eventData)
     local dt = eventData["TimeStep"]:GetFloat()
     
+    -- 开场动画优先更新（激活时阻塞其他一切）
+    if Intro.IsActive() then
+        Intro.Update(dt)
+        return
+    end
+    
     -- 更新 BGM 音量（平滑过渡）
     BGM.Update(dt)
     
@@ -437,13 +652,19 @@ end
 ---@param eventType string
 ---@param eventData KeyDownEventData
 function HandleKeyDown(eventType, eventData)
-    if PhaseOverlay.IsTransitioning() then return end
     local key = eventData["Key"]:GetInt()
+    -- 开场动画激活时由 Intro 处理所有按键
+    if Intro.IsActive() then
+        Intro.OnKeyDown(key)
+        return
+    end
+    if PhaseOverlay.IsTransitioning() then return end
     local mod = GetActiveModule()
     if mod then mod.OnKeyDown(key) end
 end
 
 function HandleKeyUp(eventType, eventData)
+    if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
     local key = eventData["Key"]:GetInt()
     local mod = GetActiveModule()
@@ -451,6 +672,7 @@ function HandleKeyUp(eventType, eventData)
 end
 
 function HandleMouseDown(eventType, eventData)
+    if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
     local button = eventData["Button"]:GetInt()
     local mod = GetActiveModule()
@@ -458,6 +680,7 @@ function HandleMouseDown(eventType, eventData)
 end
 
 function HandleMouseUp(eventType, eventData)
+    if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
     local button = eventData["Button"]:GetInt()
     local mod = GetActiveModule()
@@ -465,12 +688,18 @@ function HandleMouseUp(eventType, eventData)
 end
 
 function HandleMouseMove(eventType, eventData)
+    if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
     local mod = GetActiveModule()
     if mod then mod.OnMouseMove() end
 end
 
 function HandleTouchBegin(eventType, eventData)
+    if Intro.IsActive() then
+        -- 触摸也可跳过视频
+        Intro.Skip()
+        return
+    end
     if PhaseOverlay.IsTransitioning() then return end
     local x = eventData["X"]:GetInt()
     local y = eventData["Y"]:GetInt()
@@ -479,6 +708,7 @@ function HandleTouchBegin(eventType, eventData)
 end
 
 function HandleTouchMove(eventType, eventData)
+    if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
     local x = eventData["X"]:GetInt()
     local y = eventData["Y"]:GetInt()
@@ -487,6 +717,7 @@ function HandleTouchMove(eventType, eventData)
 end
 
 function HandleTouchEnd(eventType, eventData)
+    if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
     local x = eventData["X"]:GetInt()
     local y = eventData["Y"]:GetInt()
@@ -498,6 +729,19 @@ end
 function HandleNanoVGRender(eventType, eventData)
     local vg = NVG.Get()
     if not vg then return end
+    
+    -- 开场动画激活时，只渲染视频画面
+    if Intro.IsActive() then
+        local w = graphics:GetWidth()
+        local h = graphics:GetHeight()
+        local dpr = graphics:GetDPR()
+        nvgBeginFrame(vg, w, h, 1.0)
+        nvgScale(vg, dpr, dpr)
+        Intro.Render(vg)
+        nvgResetTransform(vg)
+        nvgEndFrame(vg)
+        return
+    end
     
     local mod = GetActiveModule()
     if mod then mod.Render(vg) end

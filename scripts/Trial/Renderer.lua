@@ -683,6 +683,53 @@ function Renderer.RenderDummyWeapon(vg, S)
     nvgStroke(vg)
 end
 
+--- 渲染被弹开的武器（格挡后武器飞出动画）
+--- @param vg userdata
+--- @param S table 共享状态表
+function Renderer.RenderDeflectedWeapon(vg, S)
+    if not S.deflecting then return end
+
+    local t = S.deflectTimer / S.deflectDuration  -- 0~1 进度
+    local alpha = math.floor((1 - t) * 255)       -- 逐渐消失
+    local speed = 180 * S.physScale                -- 弹飞速度（像素/秒）
+
+    -- 武器沿弹开方向飞出
+    local dist = speed * S.deflectTimer
+    local wx = S.deflectStartX + math.cos(S.deflectAngle) * dist
+    local wy = S.deflectStartY + math.sin(S.deflectAngle) * dist - 30 * t  -- 轻微上抛弧线
+
+    -- 武器旋转（快速旋转表示被弹飞）
+    local weaponAngle = S.deflectWeaponAngle + S.deflectSpin * S.deflectTimer
+
+    -- 缩放：略微缩小表示远离
+    local scale = (1.0 - t * 0.3) * S.physScale
+
+    -- 获取武器颜色
+    local wc = S.gameData and S.gameData.weaponData and S.gameData.weaponData.typeInfo.color or {200, 200, 200}
+
+    -- 用 RenderWeaponShape 渲染弹飞的武器（带透明度）
+    nvgSave(vg)
+    nvgGlobalAlpha(vg, alpha / 255)
+    Renderer.RenderWeaponShape(vg, S, wx, wy, weaponAngle, wc, scale, false)
+    nvgRestore(vg)
+
+    -- 武器运动轨迹（残影效果）
+    for i = 1, 3 do
+        local trailT = math.max(0, S.deflectTimer - i * 0.03)
+        local trailDist = speed * trailT
+        local tx = S.deflectStartX + math.cos(S.deflectAngle) * trailDist
+        local ty = S.deflectStartY + math.sin(S.deflectAngle) * trailDist - 30 * (trailT / S.deflectDuration)
+        local trailAlpha = math.floor(alpha * (0.3 - i * 0.08))
+        if trailAlpha > 0 then
+            nvgSave(vg)
+            nvgGlobalAlpha(vg, trailAlpha / 255)
+            local trailAngle = S.deflectWeaponAngle + S.deflectSpin * trailT
+            Renderer.RenderWeaponShape(vg, S, tx, ty, trailAngle, wc, scale * 0.9, false)
+            nvgRestore(vg)
+        end
+    end
+end
+
 --- 渲染武器碰撞特效
 --- @param vg userdata
 --- @param S table 共享状态表

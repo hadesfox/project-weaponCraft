@@ -6,6 +6,7 @@
 local UI = require("urhox-libs/UI")
 local Config = require("Config")
 local NVG = require("NVG")
+local KeyBindings = require("KeyBindings")
 
 local ForgeState = {}
 
@@ -68,7 +69,7 @@ local quenchTimer_       = 0      -- 淬火已用时间
 
 -- 砥砺阶段变量
 local GRIND_TIME_LIMIT   = Config.Forge.GrindDuration  -- 3秒
-local GRIND_KEYS         = Config.Forge.GrindKeys      -- {"J","K","L"}
+local GRIND_KEYS         = KeyBindings.GetGrindKeyNames() -- 从按键配置获取显示名
 local grindCount_        = 0      -- 完成打磨次数
 local grindKeyIndex_     = 1      -- 当前期待的按键序列索引（1~3）
 local grindTimer_        = 0      -- 砥砺已用时间
@@ -434,8 +435,8 @@ UpdateQuench = function(dt)
     -- 只有按住时才降温（越按越快）
     if quenchHolding_ then
         quenchHoldTime_ = quenchHoldTime_ + dt
-        -- 基础速率120°/s，每秒额外加速100°/s → 按住越久降温越猛
-        local rate = 120 + quenchHoldTime_ * 100
+        -- 基础速率180°/s，每秒额外加速150°/s → 按住越久降温越猛
+        local rate = 180 + quenchHoldTime_ * 150
         quenchTemp_ = quenchTemp_ - dt * rate
     end
     
@@ -549,6 +550,7 @@ PlayHammerSound = function()
     if not hammerSound_ or not hammerSource_ then return end
     hammerSource_.gain = 1.0
     hammerSource_:Play(hammerSound_)
+    BGM.DuckForSFX(0.5)  -- 锤击音效短暂压低BGM
 end
 
 
@@ -559,6 +561,7 @@ StartQuenchSound = function()
     if quenchSource_.gain > 0.5 and quenchSource_:IsPlaying() then return end  -- 已正式播放中
     quenchSource_.gain = 1.0
     quenchSource_:Play(quenchSound_)
+    BGM.DuckPrep()  -- 淬火循环期间持续压低BGM
 end
 
 
@@ -569,6 +572,7 @@ StopQuenchSound = function()
         quenchSource_:Stop()
         quenchSource_.gain = 0.0
     end
+    BGM.UnduckPrep()  -- 淬火结束，恢复BGM音量
 end
 
 
@@ -642,28 +646,25 @@ end
 
 --- 按键
 function ForgeState.OnKeyDown(key)
-    if key == KEY_SPACE then
+    if KeyBindings.IsKey("forge_hit", key) then
         OnForgeInput()
         return
     end
     
-    -- 砥砺阶段：J/K/L 按键处理
+    -- 砥砺阶段：按键处理
     if currentPhase_ == PHASE_GRIND and not grindDone_ then
-        local keyName = nil
-        if key == KEY_J then keyName = "J"
-        elseif key == KEY_K then keyName = "K"
-        elseif key == KEY_L then keyName = "L"
-        end
+        local grindIdx = KeyBindings.GetGrindIndex(key)
         
-        if keyName then
-            local expected = GRIND_KEYS[grindKeyIndex_]
-            if keyName == expected then
+        if grindIdx then
+            -- grindKeyIndex_ 是当前期望的序列位置(1/2/3)
+            if grindIdx == grindKeyIndex_ then
                 -- 按对了，播放磨刀音效
                 grindKeyIndex_ = grindKeyIndex_ + 1
                 grindFlash_ = 1.0
                 if grindSource_ and grindSound_ then
                     grindSource_.gain = 0.7
                     grindSource_:Play(grindSound_)
+                    BGM.DuckForSFX(0.4)  -- 打磨音效短暂压低BGM
                 end
                 if grindKeyIndex_ > #GRIND_KEYS then
                     -- 完成一轮打磨
@@ -681,7 +682,7 @@ function ForgeState.OnKeyDown(key)
 end
 
 function ForgeState.OnKeyUp(key)
-    if key == KEY_SPACE then
+    if KeyBindings.IsKey("forge_hit", key) then
         OnForgeInputRelease()
     end
 end
@@ -1330,17 +1331,26 @@ RenderGrindPhase = function(vg, w, h)
     nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 255))
     nvgText(vg, cx, cy - wheelR - 30, "打磨 × " .. grindCount_, nil)
     
-    -- 倒计时（右上角）
+    -- 倒计时（转盘左侧大字）
     if not grindDone_ then
         local timeText = string.format("%.1f", remaining)
-        nvgFontSize(vg, 16)
-        nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
+        local timerX = cx - wheelR - 50
+        local timerY = cy - 10
+        nvgFontFaceId(vg, fontId)
+        nvgFontSize(vg, 42)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         if remaining <= 1.0 then
-            nvgFillColor(vg, nvgRGBA(C_DANGER[1], C_DANGER[2], C_DANGER[3], 255))
+            -- 最后1秒闪烁警告
+            local blink = math.abs(math.sin(phaseTimer_ * 6)) * 0.4 + 0.6
+            nvgFillColor(vg, nvgRGBA(C_DANGER[1], C_DANGER[2], C_DANGER[3], math.floor(blink * 255)))
         else
-            nvgFillColor(vg, nvgRGBA(120, 130, 140, 200))
+            nvgFillColor(vg, nvgRGBA(220, 220, 230, 240))
         end
-        nvgText(vg, w - 16, 50, timeText .. "s", nil)
+        nvgText(vg, timerX, timerY, timeText, nil)
+        -- "秒"小字标注
+        nvgFontSize(vg, 14)
+        nvgFillColor(vg, nvgRGBA(150, 150, 160, 180))
+        nvgText(vg, timerX, timerY + 28, "秒", nil)
     end
     
     -- 结果展示

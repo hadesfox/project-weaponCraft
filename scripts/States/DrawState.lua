@@ -9,6 +9,7 @@ local NVG = require("NVG")
 local Canvas = require("Drawing.Canvas")
 local Templates = require("Drawing.Templates")
 local Analyzer = require("Drawing.Analyzer")
+local KeyBindings = require("KeyBindings")
 
 local DrawState = {}
 
@@ -267,9 +268,9 @@ end
 
 --- 按键处理
 function DrawState.OnKeyDown(key)
-    if key == KEY_Z then
+    if KeyBindings.IsKey("draw_undo", key) then
         Canvas.Undo()
-    elseif key == KEY_X then
+    elseif KeyBindings.IsKey("draw_clear", key) then
         Canvas.Clear()
     end
 end

@@ -7,17 +7,23 @@
   "entry": "main.lua",
   "version": "1.0.0",
   "taptap_publish": {
-    "title": "<game title, required>",
-    "description": "<game description>",
-    "category": "<game category: rpg, casual, action, strategy, simulation, trivia, arcade, adventure, card, sports, racing, puzzle, educational, music, word, board>",
+    "title": "锻造师",
+    "description": "画出武器、锻造成型、试炼出击！一款融合涂鸦绘制与横版动作的创意休闲游戏。",
+    "category": "casual",
     "screen_orientation": "landscape",
     "collection_type": "sce",
-    "trial_note": "<developer's note>",
-    "app_platforms": "1,2"
+    "trial_note": "",
+    "app_platforms": "1,2",
+    "developer_id": 349729,
+    "app_id": 864949,
+    "miniapp_id": "tapmcfbvqcb8yxzg1h"
   },
   "assets": {
     "icon": "",
     "screenshots": [],
     "promotional_image": ""
+  },
+  "metadata": {
+    "updated_at": "2026-05-31T01:53:34.491Z"
   }
 }

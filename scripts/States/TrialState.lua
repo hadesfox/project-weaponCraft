@@ -8,6 +8,7 @@
 local UI = require("urhox-libs/UI")
 local Config = require("Config")
 local NVG = require("NVG")
+local KeyBindings = require("KeyBindings")
 local Slime = require("Trial.Slime")
 local Renderer = require("Trial.Renderer")
 
@@ -100,6 +101,16 @@ local weaponClashX_ = 0         -- 碰撞特效位置 X
 local weaponClashY_ = 0         -- 碰撞特效位置 Y
 local weaponClashCooldown_ = 0  -- 碰撞检测冷却
 
+-- 格挡弹开系统（武器被弹飞动画）
+local deflecting_ = false       -- 是否正在弹开
+local deflectTimer_ = 0         -- 弹开计时
+local deflectDuration_ = 0.4    -- 弹开动画持续时间
+local deflectStartX_ = 0        -- 弹开起始位置 X
+local deflectStartY_ = 0        -- 弹开起始位置 Y
+local deflectAngle_ = 0         -- 弹开方向角度
+local deflectSpin_ = 0          -- 武器旋转速度（弧度/秒）
+local deflectWeaponAngle_ = 0   -- 弹开时武器初始角度
+
 -- 材质效果系统
 local materialEffect_ = nil     -- 当前材质效果ID（字符串）
 local materialAtkMod_ = 0       -- 攻击力修正
@@ -190,6 +201,9 @@ function TrialState.Enter(gameData, onComplete)
     player_.state = "idle"       -- idle / run / jump / fall
     player_.landSquash = 0       -- 着地压缩动画计时器
     player_.prevOnGround = true  -- 上一帧是否着地（用于检测落地瞬间）
+    player_.hp = Config.Combat.DummyHP       -- 玩家血量（与木桩相同，近乎无限）
+    player_.maxHp = Config.Combat.DummyHP
+    player_.hitAnim = 0          -- 受击闪烁动画
     
     -- 处理武器绘图数据（归一化笔画）
     PrepareWeaponStrokes()
@@ -240,6 +254,8 @@ function TrialState.Enter(gameData, onComplete)
     -- 初始化木桩武器和碰撞系统
     weaponClashAnim_ = 0
     weaponClashCooldown_ = 0
+    deflecting_ = false
+    deflectTimer_ = 0
     InitDummyWeapon()
     
     local weaponType = gameData_.weaponData and gameData_.weaponData.type or "UNKNOWN"
@@ -740,9 +756,9 @@ end
 
 --- 读取输入状态
 UpdateInput = function()
-    inputLeft_ = input:GetKeyDown(KEY_A) or input:GetKeyDown(KEY_LEFT)
-    inputRight_ = input:GetKeyDown(KEY_D) or input:GetKeyDown(KEY_RIGHT)
-    inputDown_ = input:GetKeyDown(KEY_S) or input:GetKeyDown(KEY_DOWN)
+    inputLeft_ = KeyBindings.IsDown("move_left")
+    inputRight_ = KeyBindings.IsDown("move_right")
+    inputDown_ = KeyBindings.IsDown("move_down")
 end
 
 --- 玩家物理（横版重力）
@@ -820,6 +836,12 @@ UpdatePlayerPhysics = function(dt)
     if player_.landSquash > 0 then
         player_.landSquash = player_.landSquash - dt
         if player_.landSquash < 0 then player_.landSquash = 0 end
+    end
+    
+    -- 更新受击闪烁
+    if player_.hitAnim > 0 then
+        player_.hitAnim = player_.hitAnim - dt * 2
+        if player_.hitAnim < 0 then player_.hitAnim = 0 end
     end
     
     -- 确定动画状态
@@ -966,11 +988,13 @@ CheckAttackCollision = function(progress)
         end
     end
     
-    -- 检测木桩碰撞
-    CheckDummyCollision(progress)
-    
-    -- 检测武器间碰撞（玩家武器 vs 木桩武器）
+    -- 先检测武器间碰撞（格挡判定优先）
     CheckWeaponClash(progress)
+    
+    -- 如果未被格挡，才检测木桩碰撞造成伤害
+    if not deflecting_ then
+        CheckDummyCollision(progress)
+    end
 end
 
 --- 检测木桩碰撞
@@ -1206,13 +1230,13 @@ end
 -- ============================================================================
 
 function TrialState.OnKeyDown(key)
-    if key == KEY_SPACE or key == KEY_W or key == KEY_UP then
+    if KeyBindings.IsKey("jump", key) then
         DoJump()
-    elseif key == KEY_J then
-        StartAttack(1)  -- J键 = 招式1（同左键）
-    elseif key == KEY_K then
-        StartAttack(2)  -- K键 = 招式2（同右键）
-    elseif key == KEY_Q then
+    elseif KeyBindings.IsKey("attack1", key) then
+        StartAttack(1)
+    elseif KeyBindings.IsKey("attack2", key) then
+        StartAttack(2)
+    elseif KeyBindings.IsKey("transform", key) then
         DoTransform()
     end
 end
@@ -1334,6 +1358,15 @@ function TrialState.Render(vg)
         weaponClashAnim = weaponClashAnim_,
         weaponClashX = weaponClashX_,
         weaponClashY = weaponClashY_,
+        -- 弹开状态
+        deflecting = deflecting_,
+        deflectTimer = deflectTimer_,
+        deflectDuration = deflectDuration_,
+        deflectStartX = deflectStartX_,
+        deflectStartY = deflectStartY_,
+        deflectAngle = deflectAngle_,
+        deflectSpin = deflectSpin_,
+        deflectWeaponAngle = deflectWeaponAngle_,
     }
     
     nvgBeginFrame(vg, w, h, 1.0)
@@ -1348,8 +1381,29 @@ function TrialState.Render(vg)
     Renderer.RenderDummyHPBar(vg, S)
     Renderer.RenderDummyWeapon(vg, S)
     Renderer.RenderAttack(vg, S)
+    Renderer.RenderDeflectedWeapon(vg, S)
     Renderer.RenderWeaponClash(vg, S)
     Slime.Render(vg, player_)
+    -- 玩家血条（受伤后显示）
+    if player_.hp and player_.maxHp and player_.hp < player_.maxHp then
+        local barY = player_.y - player_.height - 12 * physScale_
+        local barW = Config.Combat.HPBarWidth * physScale_
+        local barH = Config.Combat.HPBarHeight * physScale_
+        local cx = player_.x + player_.width / 2
+        local bx = cx - barW / 2
+        nvgBeginPath(vg)
+        nvgRoundedRect(vg, bx, barY, barW, barH, barH / 2)
+        nvgFillColor(vg, nvgRGBA(20, 20, 20, 180))
+        nvgFill(vg)
+        local ratio = player_.hp / player_.maxHp
+        local fillW = barW * ratio
+        local r, g
+        if ratio > 0.5 then r, g = 80, 200 else r, g = 240, math.floor(200 * ratio * 2) end
+        nvgBeginPath(vg)
+        nvgRoundedRect(vg, bx, barY, fillW, barH, barH / 2)
+        nvgFillColor(vg, nvgRGBA(r, g, 60, 220))
+        nvgFill(vg)
+    end
     Renderer.RenderHitEffects(vg, S)
     Renderer.RenderCombo(vg, S)
     Renderer.RenderTransformEffect(vg, S)
@@ -1468,12 +1522,16 @@ CheckDummyAttackHitPlayer = function()
         local knockDir = dummyFacingRight_ and 1 or -1
         local kb = (atk.knockback or 8) * physScale_
         
+        -- 计算伤害
+        local dmg = atk.damage or 150
+        
         -- 材质效果：shatter（碎裂）- 受击伤害/击退+20%
         if materialEffect_ == "shatter" then
             kb = kb * 1.2
+            dmg = math.floor(dmg * 1.2)
         end
         
-        -- 材质效果：lifesteal 护盾减免击退
+        -- 材质效果：lifesteal 护盾减免击退和伤害
         local shield = player_.healShield or 0
         if shield > 0 then
             local reduction = math.min(shield, kb * 0.3)
@@ -1481,11 +1539,23 @@ CheckDummyAttackHitPlayer = function()
             player_.healShield = shield - reduction
         end
         
+        -- 扣除玩家血量
+        player_.hp = math.max(0, player_.hp - dmg)
+        player_.hitAnim = 0.5  -- 受击闪烁
+        
         player_.vx = knockDir * kb * 6
         player_.vy = -kb * 2.5
         player_.onGround = false
 
-        -- 特效
+        -- 伤害数字特效
+        hitEffects_[#hitEffects_ + 1] = {
+            x = pcx,
+            y = pcy - 20,
+            text = "-" .. dmg,
+            timer = Config.Combat.DamageNumberDuration,
+            color = { 255, 80, 80 },
+        }
+        -- 招式名称特效
         hitEffects_[#hitEffects_ + 1] = {
             x = pcx,
             y = pcy - 10,
@@ -1722,21 +1792,42 @@ CheckWeaponClash = function(progress)
             print("[WeaponClash] Thorns triggered! Dummy takes " .. thornsDmg .. " damage")
         end
         
-        -- 中断攻击
+        -- 进入弹开状态（武器不直接消失，被弹向对方挥动方向）
+        deflecting_ = true
+        deflectTimer_ = 0
+        -- 弹开起点 = 碰撞点
+        deflectStartX_ = weaponClashX_
+        deflectStartY_ = weaponClashY_
+        -- 弹开方向 = 木桩武器挥动方向（对方挥动方向）
+        deflectAngle_ = dw.angle
+        -- 武器当前角度（用于渲染旋转中的武器）
+        local dir = player_.facingRight and 1 or -1
+        deflectWeaponAngle_ = dir * math.pi / 4  -- 近似挥砍角度
+        -- 旋转速度：快速旋转表示被弹飞
+        deflectSpin_ = dir * (-12)  -- 反方向旋转
+        -- 中断攻击逻辑（但保留渲染数据用于弹开动画）
         attacking_ = false
         currentAttack_ = nil
         
-        print("[WeaponClash] Weapons collided! Player pushed back with force: " .. dw.force)
+        print("[WeaponClash] Weapons collided! Weapon deflected with force: " .. dw.force)
     end
 end
 
---- 更新武器碰撞系统（动画衰减、冷却）
+--- 更新武器碰撞系统（动画衰减、冷却、弹开动画）
 UpdateWeaponClash = function(dt)
     if weaponClashAnim_ > 0 then
         weaponClashAnim_ = weaponClashAnim_ - dt * 3
     end
     if weaponClashCooldown_ > 0 then
         weaponClashCooldown_ = weaponClashCooldown_ - dt
+    end
+    -- 弹开动画更新
+    if deflecting_ then
+        deflectTimer_ = deflectTimer_ + dt
+        if deflectTimer_ >= deflectDuration_ then
+            deflecting_ = false
+            deflectTimer_ = 0
+        end
     end
 end
 

@@ -7,16 +7,19 @@
 local UI = require("urhox-libs/UI")
 local Config = require("Config")
 local NVG = require("NVG")
+local KeyBindings = require("KeyBindings")
 
 local MenuState = {}
 
 -- 前置声明（内部子函数）
 local HitTestButtons
 local HitTestSecret
+local HitTestSettings
 local ToggleBackground
 local RenderBackground
 local RenderButtons
 local RenderCharacterPanel
+local RenderSettingsPanel
 local SplitLines
 
 -- 回调
@@ -54,6 +57,16 @@ local SECRET_ZONE = { rx = 0.0, ry = 0.35, rw = 0.12, rh = 0.45 }
 -- 角色面板状态
 local showCharPanel_ = false
 local charPanelAnim_ = 0    -- 面板展开动画 (0→1)
+
+-- 设置面板状态
+local showSettings_ = false
+local settingsAnim_ = 0     -- 面板展开动画 (0→1)
+local settingsScroll_ = 0   -- 滚动偏移
+local rebindingAction_ = nil -- 当前正在重绑定的操作ID
+local rebindFlash_ = 0      -- 重绑定闪烁动画
+
+-- 设置触发点（铁砧上的盾牌图标）
+local SETTINGS_ZONE = { rx = 0.545, ry = 0.67, rw = 0.05, rh = 0.08 }
 
 -- 角色数据
 local characters_ = {
@@ -101,6 +114,11 @@ function MenuState.Enter(onStart)
     pressIndex_ = 0
     showCharPanel_ = false
     charPanelAnim_ = 0
+    showSettings_ = false
+    settingsAnim_ = 0
+    settingsScroll_ = 0
+    rebindingAction_ = nil
+    rebindFlash_ = 0
 end
 
 --- 离开菜单状态
@@ -141,6 +159,15 @@ function MenuState.Update(dt)
     -- 角色面板动画
     local targetPanel = showCharPanel_ and 1.0 or 0.0
     charPanelAnim_ = charPanelAnim_ + (targetPanel - charPanelAnim_) * dt * 8
+
+    -- 设置面板动画
+    local targetSettings = showSettings_ and 1.0 or 0.0
+    settingsAnim_ = settingsAnim_ + (targetSettings - settingsAnim_) * dt * 8
+
+    -- 重绑定闪烁
+    if rebindingAction_ then
+        rebindFlash_ = rebindFlash_ + dt * 6
+    end
 end
 
 -- ============================================================================
@@ -148,6 +175,27 @@ end
 -- ============================================================================
 
 function MenuState.OnKeyDown(key)
+    -- 设置面板：按键重绑定模式
+    if showSettings_ then
+        if rebindingAction_ then
+            -- 正在等待按键输入
+            if key == KEY_ESCAPE then
+                -- 取消重绑定
+                rebindingAction_ = nil
+            else
+                -- 绑定新按键
+                KeyBindings.SetKeys(rebindingAction_, { key })
+                KeyBindings.Save()
+                rebindingAction_ = nil
+            end
+            return
+        end
+        if key == KEY_ESCAPE then
+            showSettings_ = false
+        end
+        return
+    end
+
     if key == KEY_ESCAPE then
         if showCharPanel_ then
             showCharPanel_ = false
@@ -163,18 +211,33 @@ function MenuState.OnKeyUp(key) end
 
 function MenuState.OnMouseDown(button)
     if button ~= MOUSEB_LEFT then return end
+
+    local mx = input.mousePosition.x / graphics:GetDPR()
+    local my = input.mousePosition.y / graphics:GetDPR()
+
+    -- 设置面板打开时
+    if showSettings_ then
+        MenuState.HandleSettingsClick(mx, my)
+        return
+    end
+
     if showCharPanel_ then
         -- 点击关闭面板
         showCharPanel_ = false
         return
     end
 
-    local mx = input.mousePosition.x / graphics:GetDPR()
-    local my = input.mousePosition.y / graphics:GetDPR()
-
     -- 隐藏触发点检测（优先于按钮）
     if HitTestSecret(mx, my) then
         ToggleBackground()
+        return
+    end
+
+    -- 设置触发点
+    if HitTestSettings(mx, my) then
+        showSettings_ = true
+        settingsScroll_ = 0
+        rebindingAction_ = nil
         return
     end
 
@@ -188,6 +251,7 @@ end
 
 function MenuState.OnMouseUp(button)
     if button ~= MOUSEB_LEFT then return end
+    if showSettings_ then return end
     if pressIndex_ > 0 then
         local mx = input.mousePosition.x / graphics:GetDPR()
         local my = input.mousePosition.y / graphics:GetDPR()
@@ -209,7 +273,7 @@ function MenuState.OnMouseUp(button)
 end
 
 function MenuState.OnMouseMove()
-    if showCharPanel_ then
+    if showCharPanel_ or showSettings_ then
         hoverIndex_ = 0
         return
     end
@@ -222,6 +286,11 @@ function MenuState.OnTouchBegin(x, y)
     local dpr = graphics:GetDPR()
     local tx, ty = x / dpr, y / dpr
 
+    if showSettings_ then
+        MenuState.HandleSettingsClick(tx, ty)
+        return
+    end
+
     if showCharPanel_ then
         showCharPanel_ = false
         return
@@ -230,6 +299,14 @@ function MenuState.OnTouchBegin(x, y)
     -- 隐藏触发点检测（优先于按钮）
     if HitTestSecret(tx, ty) then
         ToggleBackground()
+        return
+    end
+
+    -- 设置触发点
+    if HitTestSettings(tx, ty) then
+        showSettings_ = true
+        settingsScroll_ = 0
+        rebindingAction_ = nil
         return
     end
 
@@ -302,6 +379,11 @@ function MenuState.Render(vg)
     -- 角色面板
     if charPanelAnim_ > 0.01 then
         RenderCharacterPanel(vg)
+    end
+
+    -- 设置面板
+    if settingsAnim_ > 0.01 then
+        RenderSettingsPanel(vg)
     end
 
     nvgResetTransform(vg)
@@ -483,6 +565,235 @@ function SplitLines(str)
         lines[#lines + 1] = line
     end
     return lines
+end
+
+-- ============================================================================
+-- 设置面板
+-- ============================================================================
+
+--- 命中测试：设置触发点（铁砧盾牌图标）
+HitTestSettings = function(mx, my)
+    local sx = screenW_ * SETTINGS_ZONE.rx
+    local sy = screenH_ * SETTINGS_ZONE.ry
+    local sw = screenW_ * SETTINGS_ZONE.rw
+    local sh = screenH_ * SETTINGS_ZONE.rh
+    return mx >= sx and mx <= sx + sw and my >= sy and my <= sy + sh
+end
+
+--- 设置面板内的点击处理
+function MenuState.HandleSettingsClick(mx, my)
+    -- 如果正在重绑定，点击任何地方取消
+    if rebindingAction_ then
+        rebindingAction_ = nil
+        return
+    end
+
+    -- 计算面板区域
+    local panelW = math.min(screenW_ * 0.85, 480)
+    local panelH = math.min(screenH_ * 0.80, 420)
+    local px = (screenW_ - panelW) / 2
+    local py = (screenH_ - panelH) / 2
+
+    -- 点击面板外部 → 关闭
+    if mx < px or mx > px + panelW or my < py or my > py + panelH then
+        showSettings_ = false
+        return
+    end
+
+    -- "恢复默认"按钮区域（面板底部）
+    local resetBtnW = 100
+    local resetBtnH = 28
+    local resetBtnX = px + panelW / 2 - resetBtnW / 2
+    local resetBtnY = py + panelH - 45
+    if mx >= resetBtnX and mx <= resetBtnX + resetBtnW and
+       my >= resetBtnY and my <= resetBtnY + resetBtnH then
+        KeyBindings.ResetToDefault()
+        return
+    end
+
+    -- 按键绑定行点击 → 进入重绑定
+    local actions = KeyBindings.Actions
+    local headerH = 50
+    local rowH = 32
+    local contentY = py + headerH - settingsScroll_
+
+    for i = 1, #actions do
+        local action = actions[i]
+        local rowY = contentY + (i - 1) * rowH
+
+        -- 分类标题占一行额外空间
+        if i > 1 and actions[i].category ~= actions[i - 1].category then
+            contentY = contentY + 20
+            rowY = contentY + (i - 1) * rowH
+        end
+
+        -- 按键区域在行右侧
+        local keyBoxX = px + panelW * 0.55
+        local keyBoxW = panelW * 0.35
+        if mx >= keyBoxX and mx <= keyBoxX + keyBoxW and
+           my >= rowY and my <= rowY + rowH then
+            rebindingAction_ = action.id
+            rebindFlash_ = 0
+            return
+        end
+    end
+end
+
+--- 渲染设置面板
+RenderSettingsPanel = function(vg)
+    local alpha = math.floor(settingsAnim_ * 255)
+    local panelScale = 0.9 + settingsAnim_ * 0.1
+
+    -- 半透明遮罩
+    nvgBeginPath(vg)
+    nvgRect(vg, 0, 0, screenW_, screenH_)
+    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(settingsAnim_ * 200)))
+    nvgFill(vg)
+
+    -- 面板尺寸
+    local panelW = math.min(screenW_ * 0.85, 480)
+    local panelH = math.min(screenH_ * 0.80, 420)
+    local px = (screenW_ - panelW) / 2
+    local py = (screenH_ - panelH) / 2
+
+    nvgSave(vg)
+    nvgTranslate(vg, screenW_ / 2, screenH_ / 2)
+    nvgScale(vg, panelScale, panelScale)
+    nvgTranslate(vg, -screenW_ / 2, -screenH_ / 2)
+
+    -- 面板背景
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, px, py, panelW, panelH, 14)
+    nvgFillColor(vg, nvgRGBA(25, 27, 35, alpha))
+    nvgFill(vg)
+    nvgStrokeColor(vg, nvgRGBA(160, 140, 90, math.floor(alpha * 0.6)))
+    nvgStrokeWidth(vg, 1.5)
+    nvgStroke(vg)
+
+    local fontId = NVG.GetFont()
+    if fontId == -1 then
+        nvgRestore(vg)
+        return
+    end
+    nvgFontFaceId(vg, fontId)
+
+    -- 标题
+    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+    nvgFontSize(vg, 20)
+    nvgFillColor(vg, nvgRGBA(160, 140, 90, alpha))
+    nvgText(vg, screenW_ / 2, py + 14, "按键设置", nil)
+
+    -- 分割线
+    nvgBeginPath(vg)
+    nvgMoveTo(vg, px + 20, py + 42)
+    nvgLineTo(vg, px + panelW - 20, py + 42)
+    nvgStrokeColor(vg, nvgRGBA(80, 80, 90, math.floor(alpha * 0.5)))
+    nvgStrokeWidth(vg, 1)
+    nvgStroke(vg)
+
+    -- 裁剪区域（内容区）
+    local contentTop = py + 48
+    local contentBottom = py + panelH - 55
+    nvgScissor(vg, px, contentTop, panelW, contentBottom - contentTop)
+
+    -- 绘制操作列表
+    local actions = KeyBindings.Actions
+    local rowH = 32
+    local curY = contentTop + 4 - settingsScroll_
+    local lastCategory = ""
+
+    for i = 1, #actions do
+        local action = actions[i]
+
+        -- 分类标题
+        if action.category ~= lastCategory then
+            lastCategory = action.category
+            -- 分类间隔
+            if i > 1 then curY = curY + 8 end
+            nvgFontSize(vg, 13)
+            nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
+            nvgFillColor(vg, nvgRGBA(100, 180, 255, math.floor(alpha * 0.8)))
+            nvgText(vg, px + 20, curY, "【" .. action.category .. "】", nil)
+            curY = curY + 22
+        end
+
+        local rowY = curY
+
+        -- 操作名
+        nvgFontSize(vg, 14)
+        nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
+        nvgFillColor(vg, nvgRGBA(200, 205, 210, alpha))
+        nvgText(vg, px + 30, rowY + rowH / 2, action.name, nil)
+
+        -- 按键框
+        local keyBoxX = px + panelW * 0.55
+        local keyBoxW = panelW * 0.35
+        local keyBoxH = rowH - 6
+        local keyBoxY = rowY + 3
+
+        local isRebinding = (rebindingAction_ == action.id)
+
+        -- 按键框背景
+        nvgBeginPath(vg)
+        nvgRoundedRect(vg, keyBoxX, keyBoxY, keyBoxW, keyBoxH, 5)
+        if isRebinding then
+            local flash = math.abs(math.sin(rebindFlash_))
+            nvgFillColor(vg, nvgRGBA(60, 50, 20, alpha))
+            nvgFill(vg)
+            nvgStrokeColor(vg, nvgRGBA(255, 200, 60, math.floor(alpha * (0.5 + flash * 0.5))))
+            nvgStrokeWidth(vg, 1.5)
+            nvgStroke(vg)
+        else
+            nvgFillColor(vg, nvgRGBA(40, 42, 52, alpha))
+            nvgFill(vg)
+            nvgStrokeColor(vg, nvgRGBA(80, 80, 95, math.floor(alpha * 0.6)))
+            nvgStrokeWidth(vg, 1)
+            nvgStroke(vg)
+        end
+
+        -- 按键文字
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+        if isRebinding then
+            nvgFontSize(vg, 12)
+            nvgFillColor(vg, nvgRGBA(255, 200, 60, alpha))
+            nvgText(vg, keyBoxX + keyBoxW / 2, keyBoxY + keyBoxH / 2, "请按下新按键...", nil)
+        else
+            nvgFontSize(vg, 13)
+            nvgFillColor(vg, nvgRGBA(180, 185, 195, alpha))
+            local displayText = KeyBindings.GetDisplayText(action.id)
+            nvgText(vg, keyBoxX + keyBoxW / 2, keyBoxY + keyBoxH / 2, displayText, nil)
+        end
+
+        curY = curY + rowH
+    end
+
+    nvgResetScissor(vg)
+
+    -- "恢复默认"按钮
+    local resetBtnW = 100
+    local resetBtnH = 28
+    local resetBtnX = px + panelW / 2 - resetBtnW / 2
+    local resetBtnY = py + panelH - 45
+
+    nvgBeginPath(vg)
+    nvgRoundedRect(vg, resetBtnX, resetBtnY, resetBtnW, resetBtnH, 5)
+    nvgFillColor(vg, nvgRGBA(60, 40, 40, alpha))
+    nvgFill(vg)
+    nvgStrokeColor(vg, nvgRGBA(200, 80, 80, math.floor(alpha * 0.7)))
+    nvgStrokeWidth(vg, 1)
+    nvgStroke(vg)
+
+    nvgFontSize(vg, 12)
+    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+    nvgFillColor(vg, nvgRGBA(220, 100, 100, alpha))
+    nvgText(vg, resetBtnX + resetBtnW / 2, resetBtnY + resetBtnH / 2, "恢复默认", nil)
+
+    -- 底部提示
+    nvgFontSize(vg, 10)
+    nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.7)))
+    nvgText(vg, screenW_ / 2, py + panelH - 12, "点击按键框修改 · ESC 关闭", nil)
+
+    nvgRestore(vg)
 end
 
 return MenuState
