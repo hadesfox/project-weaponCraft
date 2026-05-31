@@ -79,6 +79,8 @@ local grindFlash_        = 0      -- 按对闪光
 local grindMissFlash_    = 0      -- 按错闪光
 local grindWaitClick_    = false  -- 淬火结果展示后等待点击进入砥砺
 local grindResultTimer_  = 0      -- 砥砺结果展示倒计时
+local grindDragging_     = false  -- 鼠标/触摸拖动中
+local grindLastDragZone_ = 0      -- 上次拖动经过的按键区域索引（0=无）
 
 -- 延迟结束计时器（替代旧的匿名事件订阅）
 local finishTimer_ = -1      -- <0 表示未激活
@@ -99,6 +101,8 @@ local StartQuenchSound
 local StopQuenchSound
 local OnForgeInput
 local OnForgeInputRelease
+local GetGrindZoneAtPos
+local HandleGrindDrag
 local RenderHammerPhase
 local RenderQuenchPhase
 local RenderGrindPhase
@@ -249,9 +253,11 @@ InitGrindPhase = function()
     grindMissFlash_   = 0
     grindWaitClick_   = false
     grindResultTimer_ = 0
+    grindDragging_    = false
+    grindLastDragZone_ = 0
     phaseTimer_       = 0
     
-    print("[Forge/Grind] Start! Press J→K→L to grind, time limit: " .. GRIND_TIME_LIMIT .. "s")
+    print("[Forge/Grind] Start! Press J→K→L or drag across keys to grind, time limit: " .. GRIND_TIME_LIMIT .. "s")
 end
 
 
@@ -546,6 +552,57 @@ FinishGrind = function()
 end
 
 
+--- 检测逻辑坐标(lx, ly)在哪个砥砺按键区域，返回1~3或0(不在任何区域)
+GetGrindZoneAtPos = function(lx, ly)
+    local w = graphics:GetWidth() / graphics:GetDPR()
+    local h = graphics:GetHeight() / graphics:GetDPR()
+    local cx = w / 2
+    local cy = h / 2
+    local wheelR = math.min(80, h * 0.15)
+    local keyBoxW = 44
+    local keySpacing = 56
+    local keysStartX = cx - (#GRIND_KEYS - 1) * keySpacing / 2
+    local keysY = cy + wheelR + 30
+    local hitH = keyBoxW  -- 点击热区高度与按键方框一致
+
+    for i = 1, #GRIND_KEYS do
+        local kx = keysStartX + (i - 1) * keySpacing
+        if lx >= kx - keyBoxW / 2 and lx <= kx + keyBoxW / 2 and
+           ly >= keysY - hitH / 2 and ly <= keysY + hitH / 2 then
+            return i
+        end
+    end
+    return 0
+end
+
+--- 处理砥砺拖动：鼠标/触摸进入新的按键区域时触发
+HandleGrindDrag = function(lx, ly)
+    if currentPhase_ ~= PHASE_GRIND or grindDone_ then return end
+
+    local zone = GetGrindZoneAtPos(lx, ly)
+    if zone == 0 then return end
+    if zone == grindLastDragZone_ then return end  -- 还在同一区域，不重复触发
+
+    grindLastDragZone_ = zone
+
+    -- 与按键逻辑相同：必须按顺序
+    if zone == grindKeyIndex_ then
+        grindKeyIndex_ = grindKeyIndex_ + 1
+        grindFlash_ = 1.0
+        if grindSource_ and grindSound_ then
+            grindSource_.gain = 0.7
+            grindSource_:Play(grindSound_)
+            BGM.DuckForSFX(0.4)
+        end
+        if grindKeyIndex_ > #GRIND_KEYS then
+            grindCount_ = grindCount_ + 1
+            grindKeyIndex_ = 1
+            grindLastDragZone_ = 0  -- 完成一轮后重置，允许从头再来
+        end
+    end
+end
+
+
 --- 播放锤击音效（复用预创建音源，无首次延迟）
 ---@diagnostic disable-next-line: redefined-local
 PlayHammerSound = function()
@@ -696,27 +753,59 @@ end
 
 function ForgeState.OnMouseDown(button)
     if button == MOUSEB_LEFT then
+        -- 砥砺阶段：开始拖动追踪
+        if currentPhase_ == PHASE_GRIND and not grindDone_ then
+            grindDragging_ = true
+            grindLastDragZone_ = 0
+            local dpr = graphics:GetDPR()
+            local lx = input.mousePosition.x / dpr
+            local ly = input.mousePosition.y / dpr
+            HandleGrindDrag(lx, ly)
+        end
         OnForgeInput()
     end
 end
 
 function ForgeState.OnMouseUp(button)
     if button == MOUSEB_LEFT then
+        grindDragging_ = false
+        grindLastDragZone_ = 0
         OnForgeInputRelease()
     end
 end
 
 function ForgeState.OnTouchBegin(x, y)
+    -- 砥砺阶段：开始拖动追踪
+    if currentPhase_ == PHASE_GRIND and not grindDone_ then
+        grindDragging_ = true
+        grindLastDragZone_ = 0
+        local dpr = graphics:GetDPR()
+        HandleGrindDrag(x / dpr, y / dpr)
+    end
     OnForgeInput()
 end
 
 function ForgeState.OnMouseMove()
+    -- 砥砺阶段：拖动经过按键区域
+    if grindDragging_ and currentPhase_ == PHASE_GRIND and not grindDone_ then
+        local dpr = graphics:GetDPR()
+        local lx = input.mousePosition.x / dpr
+        local ly = input.mousePosition.y / dpr
+        HandleGrindDrag(lx, ly)
+    end
 end
 
 function ForgeState.OnTouchMove(x, y)
+    -- 砥砺阶段：拖动经过按键区域
+    if grindDragging_ and currentPhase_ == PHASE_GRIND and not grindDone_ then
+        local dpr = graphics:GetDPR()
+        HandleGrindDrag(x / dpr, y / dpr)
+    end
 end
 
 function ForgeState.OnTouchEnd(x, y)
+    grindDragging_ = false
+    grindLastDragZone_ = 0
     OnForgeInputRelease()
 end
 

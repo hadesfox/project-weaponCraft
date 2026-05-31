@@ -6,6 +6,7 @@ local Config = {}
 
 -- 游戏标题
 Config.Title = "锻造师"
+Config.Version = "v1.0.12"
 
 -- 游戏状态枚举
 Config.States = {
@@ -57,6 +58,9 @@ Config.Forge = {
     FinishDelay = 1.5,       -- 锻造完成后延迟过渡（秒）
 }
 
+-- 试炼场时间选项（秒）
+Config.TrialTimeOptions = { 30, 45, 60, 90, 120 }
+
 -- 试炼场配置
 Config.Trial = {
     TargetCount = 5,
@@ -97,12 +101,15 @@ Config.Trial = {
 -- ============================================================================
 Config.Combat = {
     BaseHP = 1000,            -- 敌人基础血量
-    DummyHP = 1250,           -- 锻造师血量
+    DummyHP = 2500,           -- 锻造师血量
+    DummyMoveSpeed = 120,     -- 锻造师移动速度（px/秒）
+    DummyChaseRange = 9999,   -- 锻造师追击范围（超出则不追）
+    DummyAttackRange = 70,    -- 锻造师攻击距离（进入后停止移动）
     HPBarWidth = 50,          -- 血条宽度（基础px，按physScale缩放）
     HPBarHeight = 6,          -- 血条高度
     HPBarOffsetY = -12,       -- 血条在目标头顶的偏移
     DamageNumberDuration = 0.8,  -- 伤害数字显示时长
-    TrialTimeLimit = 30,      -- 试炼场时间限制（秒）
+    TrialTimeLimit = 60,      -- 试炼场时间限制（秒）
 }
 
 -- 武器攻击配置（每种武器的攻击招式）

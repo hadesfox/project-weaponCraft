@@ -8,6 +8,7 @@ local UI = require("urhox-libs/UI")
 local Config = require("Config")
 local NVG = require("NVG")
 local KeyBindings = require("KeyBindings")
+local GameSettings = require("GameSettings")
 
 local MenuState = {}
 
@@ -146,6 +147,24 @@ end
 function MenuState.Leave()
     showCharPanel_ = false
     charPanelAnim_ = 0
+    -- 释放 GPU 纹理，避免试炼场显存不足
+    local vg = NVG.Get()
+    if vg then
+        if bgImage_ and bgImage_ ~= 0 then
+            nvgDeleteImage(vg, bgImage_)
+            bgImage_ = nil
+        end
+        if bgImageAlt_ and bgImageAlt_ ~= 0 then
+            nvgDeleteImage(vg, bgImageAlt_)
+            bgImageAlt_ = nil
+        end
+        for i = 1, #charImages_ do
+            if charImages_[i] and charImages_[i] ~= 0 then
+                nvgDeleteImage(vg, charImages_[i])
+            end
+        end
+        charImages_ = {}
+    end
 end
 
 --- 构建 UI（仅角色面板悬浮层用 UI 组件）
@@ -460,6 +479,13 @@ function MenuState.Render(vg)
         RenderLeaderboardPanel(vg)
     end
 
+    -- 右下角版本号
+    nvgFontFace(vg, "sans")
+    nvgFontSize(vg, 14)
+    nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_BOTTOM)
+    nvgFillColor(vg, nvgRGBA(80, 80, 80, 200))
+    nvgText(vg, screenW_ - 12, screenH_ - 10, Config.Version)
+
     nvgResetTransform(vg)
     nvgEndFrame(vg)
 end
@@ -679,12 +705,35 @@ function MenuState.HandleSettingsClick(mx, my)
         return
     end
 
-    -- 按键绑定行点击 → 进入重绑定
+    -- ====== 试炼时长按钮点击检测 ======
+    local contentTop = py + 52
+    local curY = contentTop + 6 - settingsScroll_
+    curY = curY + 26  -- 跳过【试炼设置】标题
+
+    -- 试炼时长按钮组区域
+    local options = Config.TrialTimeOptions
+    local btnW = 46
+    local btnH = 28
+    local btnGap = 8
+    local totalBtnsW = #options * btnW + (#options - 1) * btnGap
+    local btnsStartX = px + panelW - 24 - totalBtnsW
+    local btnRowY = curY + 4
+
+    for oi = 1, #options do
+        local bx = btnsStartX + (oi - 1) * (btnW + btnGap)
+        if mx >= bx and mx <= bx + btnW and
+           my >= btnRowY and my <= btnRowY + btnH then
+            GameSettings.SetTrialTime(options[oi])
+            return
+        end
+    end
+
+    curY = curY + 42 + 12  -- 跳过按钮行 + 分隔线间距
+
+    -- ====== 按键绑定行点击 → 进入重绑定 ======
     -- 使用与 RenderSettingsPanel 完全一致的累加逻辑
     local actions = KeyBindings.Actions
     local rowH = 36
-    local contentTop = py + 52
-    local curY = contentTop + 6 - settingsScroll_
     local lastCategory = ""
 
     for i = 1, #actions do
@@ -756,7 +805,7 @@ RenderSettingsPanel = function(vg)
     nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
     nvgFontSize(vg, 22)
     nvgFillColor(vg, nvgRGBA(160, 140, 90, alpha))
-    nvgText(vg, screenW_ / 2, py + 16, "按键设置", nil)
+    nvgText(vg, screenW_ / 2, py + 16, "系统设置", nil)
 
     -- 分割线
     nvgBeginPath(vg)
@@ -771,10 +820,75 @@ RenderSettingsPanel = function(vg)
     local contentBottom = py + panelH - 60
     nvgScissor(vg, px, contentTop, panelW, contentBottom - contentTop)
 
+    local curY = contentTop + 6 - settingsScroll_
+
+    -- ====== 试炼时长设置 ======
+    nvgFontSize(vg, 15)
+    nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
+    nvgFillColor(vg, nvgRGBA(100, 180, 255, math.floor(alpha * 0.8)))
+    nvgText(vg, px + 24, curY, "【试炼设置】", nil)
+    curY = curY + 26
+
+    -- 试炼时长行
+    nvgFontSize(vg, 16)
+    nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
+    nvgFillColor(vg, nvgRGBA(200, 205, 210, alpha))
+    nvgText(vg, px + 30, curY + 18, "试炼时长", nil)
+
+    -- 时间选项按钮组
+    local options = Config.TrialTimeOptions
+    local currentTime = GameSettings.GetTrialTime()
+    local btnW = 46
+    local btnH = 28
+    local btnGap = 8
+    local totalBtnsW = #options * btnW + (#options - 1) * btnGap
+    local btnsStartX = px + panelW - 24 - totalBtnsW
+
+    for oi = 1, #options do
+        local optVal = options[oi]
+        local bx = btnsStartX + (oi - 1) * (btnW + btnGap)
+        local by = curY + 4
+        local isSelected = (optVal == currentTime)
+
+        nvgBeginPath(vg)
+        nvgRoundedRect(vg, bx, by, btnW, btnH, 5)
+        if isSelected then
+            nvgFillColor(vg, nvgRGBA(60, 100, 60, alpha))
+            nvgFill(vg)
+            nvgStrokeColor(vg, nvgRGBA(80, 200, 120, alpha))
+        else
+            nvgFillColor(vg, nvgRGBA(40, 42, 52, alpha))
+            nvgFill(vg)
+            nvgStrokeColor(vg, nvgRGBA(80, 80, 95, math.floor(alpha * 0.6)))
+        end
+        nvgStrokeWidth(vg, 1)
+        nvgStroke(vg)
+
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+        nvgFontSize(vg, 13)
+        if isSelected then
+            nvgFillColor(vg, nvgRGBA(80, 220, 130, alpha))
+        else
+            nvgFillColor(vg, nvgRGBA(180, 185, 195, alpha))
+        end
+        nvgText(vg, bx + btnW / 2, by + btnH / 2, tostring(optVal) .. "s", nil)
+    end
+
+    curY = curY + 42
+
+    -- 分隔线（试炼设置与按键设置之间）
+    nvgBeginPath(vg)
+    nvgMoveTo(vg, px + 24, curY)
+    nvgLineTo(vg, px + panelW - 24, curY)
+    nvgStrokeColor(vg, nvgRGBA(60, 60, 70, math.floor(alpha * 0.4)))
+    nvgStrokeWidth(vg, 1)
+    nvgStroke(vg)
+    curY = curY + 12
+
+    -- ====== 按键设置 ======
     -- 绘制操作列表
     local actions = KeyBindings.Actions
     local rowH = 36
-    local curY = contentTop + 6 - settingsScroll_
     local lastCategory = ""
 
     for i = 1, #actions do
@@ -866,7 +980,7 @@ RenderSettingsPanel = function(vg)
     -- 底部提示
     nvgFontSize(vg, 12)
     nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.7)))
-    nvgText(vg, screenW_ / 2, py + panelH - 12, "点击按键框修改 · ESC 关闭", nil)
+    nvgText(vg, screenW_ / 2, py + panelH - 12, "点击选项修改 · ESC 关闭", nil)
 
     nvgRestore(vg)
 end

@@ -33,6 +33,19 @@ local function GetThrustLength(progress, attackRange, physScale)
     end
 end
 
+--- 释放所有 NVG 图片资源（在视频播放前调用，腾出 GPU 内存）
+--- @param vg userdata
+function Renderer.ReleaseImages(vg)
+    if bgImage_ and bgImage_ ~= 0 then
+        nvgDeleteImage(vg, bgImage_)
+    end
+    bgImage_ = nil
+    if dummyImage_ and dummyImage_ ~= 0 then
+        nvgDeleteImage(vg, dummyImage_)
+    end
+    dummyImage_ = nil
+end
+
 --- 预加载所有图片资源（在 Enter 时调用，避免渲染时卡顿）
 --- @param vg userdata
 function Renderer.Preload(vg)
@@ -197,12 +210,18 @@ function Renderer.RenderDummy(vg, S)
         shakeX = math.sin(S.dummy.hitAnim * 20) * 4 * S.dummy.hitAnim * S.dummy.hitDir
     end
 
+    -- 移动时的上下晃动（走路动画）
+    local bobY = 0
+    if S.dummyMoving then
+        bobY = math.sin(os.clock() * 12) * 3 * S.physScale
+    end
+
     -- 用锻造师贴图渲染（朝向跟随攻击方向）
     if dummyImage_ and dummyImage_ ~= 0 then
         nvgSave(vg)
         -- 以脚底中心为锚点，翻转朝向
         local anchorX = dx + shakeX
-        local anchorY = dy
+        local anchorY = dy + bobY
         nvgTranslate(vg, anchorX, anchorY)
         -- 贴图原始朝左，dummyFacingRight 时翻转
         if S.dummyFacingRight then

@@ -1,0 +1,242 @@
+{
+  "startTime": "2026-05-31T07:40:50.115Z",
+  "endTime": "2026-05-31T07:41:15.371Z",
+  "duration": "25256ms",
+  "result": {
+    "success": true
+  },
+  "steps": [
+    {
+      "time": "2026-05-31T07:40:50.313Z",
+      "stage": "upload_to_cdn",
+      "data": {
+        "status": "start"
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:06.247Z",
+      "stage": "upload_to_cdn",
+      "data": {
+        "status": "done"
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:06.247Z",
+      "stage": "network_config",
+      "data": {
+        "env": "production"
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:06.257Z",
+      "stage": "load_config",
+      "data": {
+        "projectId": "p_jkr1",
+        "configPath": "/userspaces/7ea3687e-d480-43a0-8221-ce787c5aac11/workspace/.project/project.json",
+        "taptap_publish": {
+          "title": "武器角斗",
+          "description": "画出武器、锻造成型、试炼出击！一款融合涂鸦绘制与横版动作的创意休闲游戏。60秒内击败锻造师，提交成绩挑战全服排行榜！",
+          "category": "casual",
+          "screen_orientation": "landscape",
+          "collection_type": "sce",
+          "trial_note": "",
+          "app_platforms": "1,2",
+          "developer_id": 349729,
+          "app_id": 864949,
+          "miniapp_id": "tapmcfbvqcb8yxzg1h"
+        },
+        "assets": {
+          "icon": "./assets/image/icon_anvil.png",
+          "screenshots": [
+            "./game_material/SCREENSHOT_2026-05-31T03-30-25_01.png",
+            "./game_material/SCREENSHOT_2026-05-31T03-30-25_02.png",
+            "./game_material/SCREENSHOT_2026-05-31T03-30-25_03.png"
+          ],
+          "promotional_image": "./assets/image/QQ20260531-122733.png",
+          "icon_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_jkr1/icon_anvil.png",
+          "screenshot_urls": [
+            "https://tapcode-sce.spark.xd.com/assets/game_material/锻造师/SCREENSHOT_2026-05-31T03-30-25_01.png",
+            "https://tapcode-sce.spark.xd.com/assets/game_material/锻造师/SCREENSHOT_2026-05-31T03-30-25_02.png",
+            "https://tapcode-sce.spark.xd.com/assets/game_material/锻造师/SCREENSHOT_2026-05-31T03-30-25_03.png"
+          ],
+          "promotional_image_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_jkr1/QQ20260531-122733.png",
+          "cover_vertical": "./.project/game_material/COVER_VERTICAL_2026-05-31T05-31-44_01.png",
+          "cover_vertical_url": "https://tapcode-sce.spark.xd.com/assets/game_material/武器角斗/COVER_VERTICAL_2026-05-31T05-31-44_01.png",
+          "cover_horizontal": "./.project/game_material/COVER_HORIZONTAL_2026-05-31T05-31-44_01.png",
+          "cover_horizontal_url": "https://tapcode-sce.spark.xd.com/assets/game_material/武器角斗/COVER_HORIZONTAL_2026-05-31T05-31-44_01.png"
+        }
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:06.578Z",
+      "stage": "update_game",
+      "data": {
+        "app_id": 864949,
+        "developer_id": 349729
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:06.599Z",
+      "stage": "upload_assets",
+      "data": {
+        "status": "start",
+        "assets": {
+          "icon": "./assets/image/icon_anvil.png",
+          "screenshots": [
+            "./game_material/SCREENSHOT_2026-05-31T03-30-25_01.png",
+            "./game_material/SCREENSHOT_2026-05-31T03-30-25_02.png",
+            "./game_material/SCREENSHOT_2026-05-31T03-30-25_03.png"
+          ],
+          "promotional_image": "./assets/image/QQ20260531-122733.png",
+          "icon_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_jkr1/icon_anvil.png",
+          "screenshot_urls": [
+            "https://tapcode-sce.spark.xd.com/assets/game_material/锻造师/SCREENSHOT_2026-05-31T03-30-25_01.png",
+            "https://tapcode-sce.spark.xd.com/assets/game_material/锻造师/SCREENSHOT_2026-05-31T03-30-25_02.png",
+            "https://tapcode-sce.spark.xd.com/assets/game_material/锻造师/SCREENSHOT_2026-05-31T03-30-25_03.png"
+          ],
+          "promotional_image_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_jkr1/QQ20260531-122733.png",
+          "cover_vertical": "./.project/game_material/COVER_VERTICAL_2026-05-31T05-31-44_01.png",
+          "cover_vertical_url": "https://tapcode-sce.spark.xd.com/assets/game_material/武器角斗/COVER_VERTICAL_2026-05-31T05-31-44_01.png",
+          "cover_horizontal": "./.project/game_material/COVER_HORIZONTAL_2026-05-31T05-31-44_01.png",
+          "cover_horizontal_url": "https://tapcode-sce.spark.xd.com/assets/game_material/武器角斗/COVER_HORIZONTAL_2026-05-31T05-31-44_01.png"
+        }
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:11.019Z",
+      "stage": "upload_cover_horizontal",
+      "data": {
+        "path": "./.project/game_material/COVER_HORIZONTAL_2026-05-31T05-31-44_01.png",
+        "resolvedPath": "/userspaces/7ea3687e-d480-43a0-8221-ce787c5aac11/workspace/.project/game_material/COVER_HORIZONTAL_2026-05-31T05-31-44_01.png"
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:11.047Z",
+      "stage": "upload_cover_horizontal",
+      "data": {
+        "fileSize": 2505605
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:11.926Z",
+      "stage": "upload_cover_horizontal",
+      "data": {
+        "response": {
+          "result": true,
+          "image_url": "https://img-tc.tapimg.com/market/images/Fnq4J0I4_3gOZIl7XFZSFPR3gvQT.png"
+        }
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:11.926Z",
+      "stage": "upload_cover_vertical",
+      "data": {
+        "path": "./.project/game_material/COVER_VERTICAL_2026-05-31T05-31-44_01.png",
+        "resolvedPath": "/userspaces/7ea3687e-d480-43a0-8221-ce787c5aac11/workspace/.project/game_material/COVER_VERTICAL_2026-05-31T05-31-44_01.png"
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:12.228Z",
+      "stage": "upload_cover_vertical",
+      "data": {
+        "fileSize": 3247418
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:13.233Z",
+      "stage": "upload_cover_vertical",
+      "data": {
+        "response": {
+          "result": true,
+          "image_url": "https://img-tc.tapimg.com/market/images/FhZ0asWRhpy_hilAQrDtgq5A3Zfv.png"
+        }
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:13.233Z",
+      "stage": "upload_assets",
+      "data": {
+        "status": "done",
+        "uploadedAssets": {
+          "iconUrl": "https://img-tc.tapimg.com/market/images/Fvp50qbE-ffJJu9ytYYzZDU5khIM.png",
+          "screenshotUrls": [
+            "https://img-tc.tapimg.com/market/images/FnouguP6-phqm3YjpROYiLgfbstm.png",
+            "https://img-tc.tapimg.com/market/images/Fmxys9UwgYbloQ04VkSjO2yEDB6i.png",
+            "https://img-tc.tapimg.com/market/images/FiMBDEYXFXq9p6ftlg7LmX3o1tQl.png"
+          ],
+          "bannerUrl": "https://img-tc.tapimg.com/market/images/FtEAEDxABa4zSdG9mufs0K0qMEJP.png",
+          "coverUrl": "https://img-tc.tapimg.com/market/images/Fnq4J0I4_3gOZIl7XFZSFPR3gvQT.png",
+          "coverVerticalUrl": "https://img-tc.tapimg.com/market/images/FhZ0asWRhpy_hilAQrDtgq5A3Zfv.png"
+        }
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:13.233Z",
+      "stage": "submit_spark_request",
+      "data": {
+        "app_id": 864949,
+        "developer_id": 349729,
+        "map_version": "20",
+        "sce_project_id": "p_jkr1",
+        "category": "casual",
+        "collection_type": "casual",
+        "description": "画出武器、锻造成型、试炼出击！一款融合涂鸦绘制与横版动作的创意休闲游戏。60秒内击败锻造师，提交成绩挑战全服排行榜！",
+        "screen_orientation": 2,
+        "title": "武器角斗",
+        "icon": "https://img-tc.tapimg.com/market/images/Fvp50qbE-ffJJu9ytYYzZDU5khIM.png",
+        "screenshots": [
+          "https://img-tc.tapimg.com/market/images/FnouguP6-phqm3YjpROYiLgfbstm.png",
+          "https://img-tc.tapimg.com/market/images/Fmxys9UwgYbloQ04VkSjO2yEDB6i.png",
+          "https://img-tc.tapimg.com/market/images/FiMBDEYXFXq9p6ftlg7LmX3o1tQl.png"
+        ],
+        "banner": "https://img-tc.tapimg.com/market/images/FtEAEDxABa4zSdG9mufs0K0qMEJP.png",
+        "trial_note": "",
+        "app_platforms": "1,2",
+        "cover": "https://img-tc.tapimg.com/market/images/Fnq4J0I4_3gOZIl7XFZSFPR3gvQT.png",
+        "cover_vertical": "https://img-tc.tapimg.com/market/images/FhZ0asWRhpy_hilAQrDtgq5A3Zfv.png",
+        "publish_intl": false
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:14.885Z",
+      "stage": "submit_spark_response",
+      "data": {
+        "app_id": 864949,
+        "app_title": "武器角斗",
+        "category": "casual",
+        "category_label": "休闲",
+        "display_app_title": "休闲游戏大全"
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:14.885Z",
+      "stage": "update_project_app_id",
+      "data": {
+        "stage": "start",
+        "project_id": "p_jkr1",
+        "app_id": 864949
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:15.371Z",
+      "stage": "update_project_app_id",
+      "data": {
+        "stage": "success",
+        "project_id": "p_jkr1",
+        "app_id": 864949
+      }
+    },
+    {
+      "time": "2026-05-31T07:41:15.371Z",
+      "stage": "publish_result",
+      "data": {
+        "action": "updated",
+        "status": "pending_review",
+        "game_id": 864949,
+        "message": "成功更新游戏 \"武器角斗\"",
+        "developer_id": 349729,
+        "config_file_path": "/userspaces/7ea3687e-d480-43a0-8221-ce787c5aac11/workspace/.project/project.json"
+      }
+    }
+  ]
+}

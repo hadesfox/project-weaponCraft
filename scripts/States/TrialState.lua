@@ -9,6 +9,7 @@ local UI = require("urhox-libs/UI")
 local Config = require("Config")
 local NVG = require("NVG")
 local KeyBindings = require("KeyBindings")
+local GameSettings = require("GameSettings")
 local Slime = require("Trial.Slime")
 local Renderer = require("Trial.Renderer")
 
@@ -91,9 +92,12 @@ local dummyCurrentAttack_ = nil
 local dummyAttackCooldown_ = 0       -- 攻击间隔冷却
 local dummyAttackProgress_ = 0       -- 当前攻击进度 0~1
 local dummyFacingRight_ = false      -- 木桩面朝方向（朝向玩家）
-local DUMMY_ATTACK_INTERVAL_MIN = 0.8  -- 最短攻击间隔（秒）
-local DUMMY_ATTACK_INTERVAL_MAX = 1.8  -- 最长攻击间隔（秒）
+local DUMMY_ATTACK_INTERVAL_MIN = 0.15 -- 最短攻击间隔（秒）
+local DUMMY_ATTACK_INTERVAL_MAX = 0.35 -- 最长攻击间隔（秒）
 local dummyHitPlayer_ = false        -- 本次攻击是否已命中玩家
+local dummyAttacks_ = {}             -- 锻造师专用攻击组（斧）
+local dummyMoving_ = false           -- 锻造师是否在移动
+local dummyVx_ = 0                   -- 锻造师水平速度
 
 -- 武器碰撞系统
 local weaponClashAnim_ = 0      -- 武器碰撞特效计时
@@ -185,10 +189,12 @@ local UpdateHUD
 local InitDummyWeapon
 local UpdateDummyWeapon
 local UpdateDummyAttack
+local UpdateDummyMovement
 local CheckDummyAttackHitPlayer
 local CheckWeaponClash
 local GetPlayerWeaponCollider
 local UpdateWeaponClash
+
 local ShowEndScreen
 local SubmitScore
 local FetchLeaderboard
@@ -248,7 +254,7 @@ function TrialState.Enter(gameData, onComplete)
     
     -- 初始化试炼计时系统
     trialTimer_ = 0
-    trialTimeLimit_ = Config.Combat.TrialTimeLimit
+    trialTimeLimit_ = GameSettings.GetTrialTime()
     trialTotalDamage_ = 0
     trialEnded_ = false
     trialEndReason_ = ""
@@ -265,10 +271,6 @@ function TrialState.Enter(gameData, onComplete)
     inputDown_ = false
     dropThrough_ = 0
     
-    -- 预加载资源到引擎缓存（WASM 平台避免首帧网络下载卡顿）
-    cache:GetResource("Texture2D", "image/kzpncvhk5eq10kyyiudqnhs-20260531125017.png")
-    cache:GetResource("Texture2D", Config.Trial.PlayerImage)
-    cache:GetResource("Texture2D", Config.Trial.EnemyImage)
     -- 预加载渲染器 NanoVG 图片句柄
     Renderer.Preload(NVG.Get())
     
@@ -298,6 +300,11 @@ function TrialState.Enter(gameData, onComplete)
     deflecting_ = false
     deflectTimer_ = 0
     InitDummyWeapon()
+    
+    -- 锻造师使用斧攻击组（独立于玩家武器）
+    dummyAttacks_ = Config.Attacks.AXE
+    dummyMoving_ = false
+    dummyVx_ = 0
     
     local weaponType = gameData_.weaponData and gameData_.weaponData.type or "UNKNOWN"
     print("[TrialState] Entered. Weapon: " .. weaponType .. " Composite: " .. tostring(isComposite_))
@@ -554,9 +561,9 @@ RecalcPlatforms = function()
         }
     end
     
-    -- 木桩（尺寸按 physScale_ 缩放）
+    -- 木桩（尺寸按 physScale_ 缩放，保留移动后的位置）
     dummy_ = {
-        x = screenW_ * dummyDef_.rx,
+        x = dummy_ and dummy_.x or screenW_ * dummyDef_.rx,
         y = groundY_,
         width = dummyDef_.baseW * physScale_,
         height = dummyDef_.baseH * physScale_,
@@ -564,6 +571,7 @@ RecalcPlatforms = function()
         hitDir = dummy_ and dummy_.hitDir or 0,
         hp = dummy_ and dummy_.hp or Config.Combat.DummyHP,
         maxHp = Config.Combat.DummyHP,
+        alive = dummy_ and dummy_.alive ~= false,
     }
 end
 
@@ -788,6 +796,16 @@ function TrialState.Update(dt)
         trialTimer_ = trialTimeLimit_
         trialEnded_ = true
         trialEndReason_ = "timeout"
+        attacking_ = false
+        currentAttack_ = nil
+        ShowEndScreen()
+        return
+    end
+    
+    -- 检测玩家血量归零（被锻造师击败）
+    if player_.hp <= 0 and not trialEnded_ then
+        trialEnded_ = true
+        trialEndReason_ = "defeated"
         attacking_ = false
         currentAttack_ = nil
         ShowEndScreen()
@@ -1353,7 +1371,8 @@ ShowEndScreen = function()
 
     -- 计算用时（秒，取整）
     local timeUsed = math.ceil(trialTimer_)
-    local reasonText = trialEndReason_ == "kill" and "锻造师被击败!" or "时间到!"
+    local reasonText = trialEndReason_ == "kill" and "锻造师被击败!"
+        or trialEndReason_ == "defeated" and "你被击败了!" or "时间到!"
     local borderColor = trialEndReason_ == "kill" and Config.Colors.Gold or { 200, 80, 80, 255 }
 
     -- 左侧：结算信息 + 名字输入
@@ -1773,6 +1792,7 @@ function TrialState.Render(vg)
         dummyCurrentAttack = dummyCurrentAttack_,
         dummyAttackProgress = dummyAttackProgress_,
         dummyFacingRight = dummyFacingRight_,
+        dummyMoving = dummyMoving_,
         attacking = attacking_,
         currentAttack = currentAttack_,
         attackTimer = attackTimer_,
@@ -1854,13 +1874,15 @@ end
 --- 更新木桩攻击AI（随机挥剑，使用与玩家相同的攻击模组）
 UpdateDummyAttack = function(dt)
     if not dummy_ or not dummyWeapon_ then return end
-    if #attacks_ == 0 then return end
+    if #dummyAttacks_ == 0 then return end
 
     -- 木桩朝向玩家
     dummyFacingRight_ = player_.x > dummy_.x
 
-    -- 攻击中：更新进度
+    -- 攻击中：更新进度（攻击时不移动）
     if dummyAttacking_ then
+        dummyMoving_ = false
+        dummyVx_ = 0
         dummyAttackTimer_ = dummyAttackTimer_ + dt
         dummyAttackProgress_ = dummyAttackTimer_ / dummyAttackDuration_
 
@@ -1880,21 +1902,51 @@ UpdateDummyAttack = function(dt)
         return
     end
 
-    -- 冷却中
+    -- 冷却中：边追击边等待
     if dummyAttackCooldown_ > 0 then
         dummyAttackCooldown_ = dummyAttackCooldown_ - dt
-        return
+        UpdateDummyMovement(dt)
+        if dummyAttackCooldown_ > 0 then return end
     end
 
-    -- 发起新攻击：随机选择一个招式
-    local idx = math.random(1, #attacks_)
-    dummyCurrentAttack_ = attacks_[idx]
+    -- 冷却结束：立即发起攻击（无需距离判断）
+    UpdateDummyMovement(dt)
+    local idx = math.random(1, #dummyAttacks_)
+    dummyCurrentAttack_ = dummyAttacks_[idx]
     dummyAttacking_ = true
     dummyAttackTimer_ = 0
     dummyAttackProgress_ = 0
     dummyHitPlayer_ = false
-    -- 木桩攻击速度与玩家接近
-    dummyAttackDuration_ = dummyCurrentAttack_.duration * 1.0
+    dummyAttackDuration_ = dummyCurrentAttack_.duration * 0.7
+end
+
+--- 锻造师移动追击玩家
+UpdateDummyMovement = function(dt)
+    if not dummy_ then return end
+    
+    local distToPlayer = math.abs(player_.x - dummy_.x)
+    local atkRange = Config.Combat.DummyAttackRange * physScale_
+    
+    -- 在攻击范围内则停止
+    if distToPlayer <= atkRange then
+        dummyMoving_ = false
+        dummyVx_ = 0
+        return
+    end
+    
+    -- 追击玩家
+    dummyMoving_ = true
+    local speed = Config.Combat.DummyMoveSpeed * physScale_
+    local dir = dummyFacingRight_ and 1 or -1
+    dummyVx_ = dir * speed
+    
+    -- 更新位置
+    dummy_.x = dummy_.x + dummyVx_ * dt
+    
+    -- 边界限制（不超出屏幕）
+    local margin = dummy_.width * 0.5
+    if dummy_.x < margin then dummy_.x = margin end
+    if dummy_.x > screenW_ - margin then dummy_.x = screenW_ - margin end
 end
 
 --- 检测木桩攻击是否命中玩家
