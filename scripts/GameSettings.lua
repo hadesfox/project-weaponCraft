@@ -9,7 +9,7 @@ local GameSettings = {}
 -- 默认值
 local defaults_ = {
     trialTime = Config.Combat.TrialTimeLimit,         -- 试炼时长（默认60秒）
-    materialTime = Config.MaterialDanmaku.Duration,   -- 选材时长（默认5秒）
+    materialTime = Config.Forge.MaterialDuration,     -- 选材时长（默认5秒）
     hammerTime = Config.Forge.HammerDuration,         -- 锤击时长（默认5秒）
     quenchTime = Config.Forge.QuenchDuration,         -- 淬火时长（默认5秒）
     grindTime = Config.Forge.GrindDuration,           -- 砥砺时长（默认3秒）

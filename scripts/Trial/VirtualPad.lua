@@ -11,10 +11,10 @@ local VirtualPad = {}
 -- 内部状态
 -- ============================================================================
 
-local isMobile_ = false
+local _isMobile = false
 
 ---@class JoystickState
-local joystick_ = {
+local _joystick = {
     cx = 0, cy = 0,
     baseRadius = 0,
     knobRadius = 0,
@@ -24,15 +24,15 @@ local joystick_ = {
     dirX = 0, dirY = 0,
 }
 
-local activeTouches_ = {}   -- { [touchID] = "jump"|"attack1"|"attack2"|"down" }
-local btnPressed_ = { jump = false, attack1 = false, attack2 = false, down = false }
-local btnRects_ = {}        -- { jump={x,y,w,h}, ... }
+local _activeTouches = {}   -- { [touchID] = "jump"|"attack1"|"attack2"|"down" }
+local _btnPressed = { jump = false, attack1 = false, attack2 = false, down = false }
+local _btnRects = {}        -- { jump={x,y,w,h}, ... }
 
-local screenW_ = 0
-local screenH_ = 0
+local _screenW = 0
+local _screenH = 0
 
 -- 外部回调（由宿主设置）
-local callbacks_ = {
+local _callbacks = {
     onJump = nil,           -- function()
     onAttack1 = nil,        -- function()
     onAttack2 = nil,        -- function()
@@ -47,53 +47,53 @@ local callbacks_ = {
 
 --- 初始化（进入状态时调用）
 function VirtualPad.Init()
-    isMobile_ = PlatformUtils.NeedsVirtualJoystick()
-    activeTouches_ = {}
-    for k in pairs(btnPressed_) do btnPressed_[k] = false end
+    _isMobile = PlatformUtils.NeedsVirtualJoystick()
+    _activeTouches = {}
+    for k in pairs(_btnPressed) do _btnPressed[k] = false end
     VirtualPad.ResetJoystick()
 end
 
 --- 是否处于手机操控模式
 ---@return boolean
 function VirtualPad.IsActive()
-    return isMobile_
+    return _isMobile
 end
 
 --- 获取摇杆 X 方向 (-1 ~ 1)
 ---@return number
 function VirtualPad.GetDirX()
-    return joystick_.dirX
+    return _joystick.dirX
 end
 
 --- 获取摇杆 Y 方向 (-1 ~ 1，向下为正)
 ---@return number
 function VirtualPad.GetDirY()
-    return joystick_.dirY
+    return _joystick.dirY
 end
 
 --- 某个右侧按钮是否按下
 ---@param name string
 ---@return boolean
 function VirtualPad.IsPressed(name)
-    return btnPressed_[name] or false
+    return _btnPressed[name] or false
 end
 
 --- 设置按钮回调
 ---@param cbs table
 function VirtualPad.SetCallbacks(cbs)
     for k, v in pairs(cbs) do
-        callbacks_[k] = v
+        _callbacks[k] = v
     end
 end
 
 --- 重置摇杆状态（释放时、重新进入时）
 function VirtualPad.ResetJoystick()
-    joystick_.active = false
-    joystick_.touchID = -1
-    joystick_.knobX = 0
-    joystick_.knobY = 0
-    joystick_.dirX = 0
-    joystick_.dirY = 0
+    _joystick.active = false
+    _joystick.touchID = -1
+    _joystick.knobX = 0
+    _joystick.knobY = 0
+    _joystick.dirX = 0
+    _joystick.dirY = 0
 end
 
 -- ============================================================================
@@ -104,8 +104,8 @@ end
 ---@param sw number 逻辑宽度
 ---@param sh number 逻辑高度
 function VirtualPad.UpdateLayout(sw, sh)
-    screenW_ = sw
-    screenH_ = sh
+    _screenW = sw
+    _screenH = sh
 
     local btnSize = math.floor(sh * 0.12)
     local pad = math.floor(sh * 0.03)
@@ -113,11 +113,11 @@ function VirtualPad.UpdateLayout(sw, sh)
     -- 左侧摇杆
     local baseR = math.floor(sh * 0.14)
     local knobR = math.floor(baseR * 0.4)
-    joystick_.baseRadius = baseR
-    joystick_.knobRadius = knobR
-    if not joystick_.active then
-        joystick_.cx = pad + baseR + pad
-        joystick_.cy = sh - pad - baseR - pad
+    _joystick.baseRadius = baseR
+    _joystick.knobRadius = knobR
+    if not _joystick.active then
+        _joystick.cx = pad + baseR + pad
+        _joystick.cy = sh - pad - baseR - pad
     end
 
     -- 右侧按钮
@@ -132,10 +132,10 @@ function VirtualPad.UpdateLayout(sw, sh)
     local atk2Y = bottomY - btnSize - pad * 0.5
     local downY = bottomY + btnSize * 0.15 + pad * 0.5
 
-    btnRects_.jump    = { x = jumpX, y = jumpY, w = btnSize, h = btnSize }
-    btnRects_.attack1 = { x = atk1X, y = atk1Y, w = btnSize, h = btnSize }
-    btnRects_.attack2 = { x = atk2X, y = atk2Y, w = btnSize, h = btnSize }
-    btnRects_.down    = { x = downX, y = downY, w = btnSize, h = btnSize * 0.7 }
+    _btnRects.jump    = { x = jumpX, y = jumpY, w = btnSize, h = btnSize }
+    _btnRects.attack1 = { x = atk1X, y = atk1Y, w = btnSize, h = btnSize }
+    _btnRects.attack2 = { x = atk2X, y = atk2Y, w = btnSize, h = btnSize }
+    _btnRects.down    = { x = downX, y = downY, w = btnSize, h = btnSize * 0.7 }
 end
 
 -- ============================================================================
@@ -144,33 +144,33 @@ end
 
 --- 判断点是否在摇杆检测区内
 local function HitTestJoystick(tx, ty)
-    local dx = tx - joystick_.cx
-    local dy = ty - joystick_.cy
+    local dx = tx - _joystick.cx
+    local dy = ty - _joystick.cy
     local dist = math.sqrt(dx * dx + dy * dy)
-    return dist <= joystick_.baseRadius * 1.5
+    return dist <= _joystick.baseRadius * 1.5
 end
 
 --- 更新摇杆方向
 local function UpdateJoystickDir(tx, ty)
-    local dx = tx - joystick_.cx
-    local dy = ty - joystick_.cy
+    local dx = tx - _joystick.cx
+    local dy = ty - _joystick.cy
     local dist = math.sqrt(dx * dx + dy * dy)
-    local maxDist = joystick_.baseRadius
+    local maxDist = _joystick.baseRadius
 
     if dist > maxDist then
         dx = dx / dist * maxDist
         dy = dy / dist * maxDist
     end
 
-    joystick_.knobX = dx
-    joystick_.knobY = dy
-    joystick_.dirX = dx / maxDist
-    joystick_.dirY = dy / maxDist
+    _joystick.knobX = dx
+    _joystick.knobY = dy
+    _joystick.dirX = dx / maxDist
+    _joystick.dirY = dy / maxDist
 end
 
 --- 判断点落在哪个右侧按钮上
 local function HitTestBtn(tx, ty)
-    for name, r in pairs(btnRects_) do
+    for name, r in pairs(_btnRects) do
         if tx >= r.x and tx <= r.x + r.w and ty >= r.y and ty <= r.y + r.h then
             return name
         end
@@ -180,22 +180,22 @@ end
 
 --- 同步按钮按下状态
 local function SyncBtnInput()
-    for k in pairs(btnPressed_) do btnPressed_[k] = false end
-    for _, btnName in pairs(activeTouches_) do
-        btnPressed_[btnName] = true
+    for k in pairs(_btnPressed) do _btnPressed[k] = false end
+    for _, btnName in pairs(_activeTouches) do
+        _btnPressed[btnName] = true
     end
 end
 
 --- 触发按钮对应的回调
 local function FireButtonCallback(btn)
-    if btn == "jump" and callbacks_.onJump then
-        callbacks_.onJump()
-    elseif btn == "attack1" and callbacks_.onAttack1 then
-        callbacks_.onAttack1()
-    elseif btn == "attack2" and callbacks_.onAttack2 then
-        callbacks_.onAttack2()
-    elseif btn == "down" and callbacks_.onDown then
-        callbacks_.onDown()
+    if btn == "jump" and _callbacks.onJump then
+        _callbacks.onJump()
+    elseif btn == "attack1" and _callbacks.onAttack1 then
+        _callbacks.onAttack1()
+    elseif btn == "attack2" and _callbacks.onAttack2 then
+        _callbacks.onAttack2()
+    elseif btn == "down" and _callbacks.onDown then
+        _callbacks.onDown()
     end
 end
 
@@ -204,14 +204,14 @@ end
 ---@param y number 物理像素 Y
 ---@param touchID number
 function VirtualPad.OnTouchBegin(x, y, touchID)
-    if not isMobile_ then return end
+    if not _isMobile then return end
     local dpr = graphics:GetDPR()
     local tx, ty = x / dpr, y / dpr
 
     -- 优先：摇杆区域（左半屏）
-    if not joystick_.active and tx < screenW_ * 0.5 and HitTestJoystick(tx, ty) then
-        joystick_.active = true
-        joystick_.touchID = touchID
+    if not _joystick.active and tx < _screenW * 0.5 and HitTestJoystick(tx, ty) then
+        _joystick.active = true
+        _joystick.touchID = touchID
         UpdateJoystickDir(tx, ty)
         return
     end
@@ -219,28 +219,28 @@ function VirtualPad.OnTouchBegin(x, y, touchID)
     -- 右侧按钮
     local btn = HitTestBtn(tx, ty)
     if btn then
-        activeTouches_[touchID] = btn
+        _activeTouches[touchID] = btn
         FireButtonCallback(btn)
         SyncBtnInput()
         return
     end
 
     -- 左半屏随意按下：以触摸位置为临时圆心
-    if not joystick_.active and tx < screenW_ * 0.45 then
-        joystick_.active = true
-        joystick_.touchID = touchID
-        joystick_.cx = tx
-        joystick_.cy = ty
-        joystick_.knobX = 0
-        joystick_.knobY = 0
-        joystick_.dirX = 0
-        joystick_.dirY = 0
+    if not _joystick.active and tx < _screenW * 0.45 then
+        _joystick.active = true
+        _joystick.touchID = touchID
+        _joystick.cx = tx
+        _joystick.cy = ty
+        _joystick.knobX = 0
+        _joystick.knobY = 0
+        _joystick.dirX = 0
+        _joystick.dirY = 0
         return
     end
 
     -- 右半屏未命中按钮：默认攻击
-    if tx > screenW_ * 0.55 and callbacks_.onDefaultAttack then
-        callbacks_.onDefaultAttack()
+    if tx > _screenW * 0.55 and _callbacks.onDefaultAttack then
+        _callbacks.onDefaultAttack()
     end
 end
 
@@ -249,11 +249,11 @@ end
 ---@param y number
 ---@param touchID number
 function VirtualPad.OnTouchMove(x, y, touchID)
-    if not isMobile_ then return end
+    if not _isMobile then return end
     local dpr = graphics:GetDPR()
     local tx, ty = x / dpr, y / dpr
 
-    if joystick_.active and joystick_.touchID == touchID then
+    if _joystick.active and _joystick.touchID == touchID then
         UpdateJoystickDir(tx, ty)
     end
 end
@@ -263,19 +263,19 @@ end
 ---@param y number
 ---@param touchID number
 function VirtualPad.OnTouchEnd(x, y, touchID)
-    if not isMobile_ then return end
+    if not _isMobile then return end
 
     -- 摇杆释放
-    if joystick_.active and joystick_.touchID == touchID then
+    if _joystick.active and _joystick.touchID == touchID then
         VirtualPad.ResetJoystick()
         return
     end
 
     -- 按钮释放
-    local btn = activeTouches_[touchID]
-    activeTouches_[touchID] = nil
-    if btn == "down" and callbacks_.onDownRelease then
-        callbacks_.onDownRelease()
+    local btn = _activeTouches[touchID]
+    _activeTouches[touchID] = nil
+    if btn == "down" and _callbacks.onDownRelease then
+        _callbacks.onDownRelease()
     end
     SyncBtnInput()
 end
@@ -286,11 +286,11 @@ end
 
 --- 渲染摇杆底盘和把手
 local function RenderJoystick(vg)
-    local jsCx = joystick_.cx
-    local jsCy = joystick_.cy
-    local baseR = joystick_.baseRadius
-    local knobR = joystick_.knobRadius
-    local active = joystick_.active
+    local jsCx = _joystick.cx
+    local jsCy = _joystick.cy
+    local baseR = _joystick.baseRadius
+    local knobR = _joystick.knobRadius
+    local active = _joystick.active
 
     -- 底盘外圈
     nvgBeginPath(vg)
@@ -322,8 +322,8 @@ local function RenderJoystick(vg)
     nvgStroke(vg)
 
     -- 把手
-    local knobCx = jsCx + joystick_.knobX
-    local knobCy = jsCy + joystick_.knobY
+    local knobCx = jsCx + _joystick.knobX
+    local knobCy = jsCy + _joystick.knobY
     -- 阴影
     nvgBeginPath(vg)
     nvgCircle(vg, knobCx + 2, knobCy + 2, knobR)
@@ -344,8 +344,8 @@ local function RenderButtons(vg)
     local alpha = 140
     local pressedAlpha = 220
 
-    for name, r in pairs(btnRects_) do
-        local pressed = btnPressed_[name]
+    for name, r in pairs(_btnRects) do
+        local pressed = _btnPressed[name]
         local a = pressed and pressedAlpha or alpha
         local radius = math.min(r.w, r.h) * 0.2
 

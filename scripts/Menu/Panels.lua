@@ -13,16 +13,16 @@ local Panels = {}
 -- 面板状态
 -- ============================================================================
 
-local showSettings_ = false
-local settingsAnim_ = 0
-local settingsScroll_ = 0
-local rebindingAction_ = nil
-local rebindFlash_ = 0
+local _showSettings = false
+local _settingsAnim = 0
+local _settingsScroll = 0
+local _rebindingAction = nil
+local _rebindFlash = 0
 
-local showLeaderboard_ = false
-local leaderboardAnim_ = 0
-local menuLeaderboardData_ = {}
-local menuLeaderboardLoading_ = false
+local _showLeaderboard = false
+local _leaderboardAnim = 0
+local _menuLeaderboardData = {}
+local _menuLeaderboardLoading = false
 
 -- 触发区域（比例坐标）
 local SETTINGS_ZONE = { rx = 0.545, ry = 0.67, rw = 0.05, rh = 0.08 }
@@ -33,19 +33,19 @@ local LEADERBOARD_ZONE = { rx = 0.05, ry = 0.02, rw = 0.14, rh = 0.35 }
 -- ============================================================================
 
 function Panels.IsSettingsOpen()
-    return showSettings_
+    return _showSettings
 end
 
 function Panels.IsLeaderboardOpen()
-    return showLeaderboard_
+    return _showLeaderboard
 end
 
 function Panels.GetSettingsAnim()
-    return settingsAnim_
+    return _settingsAnim
 end
 
 function Panels.GetLeaderboardAnim()
-    return leaderboardAnim_
+    return _leaderboardAnim
 end
 
 -- ============================================================================
@@ -53,34 +53,34 @@ end
 -- ============================================================================
 
 function Panels.Reset()
-    showSettings_ = false
-    settingsAnim_ = 0
-    settingsScroll_ = 0
-    rebindingAction_ = nil
-    rebindFlash_ = 0
-    showLeaderboard_ = false
-    leaderboardAnim_ = 0
-    menuLeaderboardData_ = {}
-    menuLeaderboardLoading_ = false
+    _showSettings = false
+    _settingsAnim = 0
+    _settingsScroll = 0
+    _rebindingAction = nil
+    _rebindFlash = 0
+    _showLeaderboard = false
+    _leaderboardAnim = 0
+    _menuLeaderboardData = {}
+    _menuLeaderboardLoading = false
 end
 
 function Panels.OpenSettings()
-    showSettings_ = true
-    settingsScroll_ = 0
-    rebindingAction_ = nil
+    _showSettings = true
+    _settingsScroll = 0
+    _rebindingAction = nil
 end
 
 function Panels.CloseSettings()
-    showSettings_ = false
+    _showSettings = false
 end
 
 function Panels.OpenLeaderboard()
-    showLeaderboard_ = true
+    _showLeaderboard = true
     Panels.FetchLeaderboard()
 end
 
 function Panels.CloseLeaderboard()
-    showLeaderboard_ = false
+    _showLeaderboard = false
 end
 
 -- ============================================================================
@@ -109,26 +109,26 @@ end
 
 --- 键盘事件（重绑定模式）。返回 true 表示已消费
 function Panels.HandleKeyDown(key)
-    if showSettings_ then
-        if rebindingAction_ then
+    if _showSettings then
+        if _rebindingAction then
             if key == KEY_ESCAPE then
-                rebindingAction_ = nil
+                _rebindingAction = nil
             else
-                KeyBindings.SetKeys(rebindingAction_, { key })
+                KeyBindings.SetKeys(_rebindingAction, { key })
                 KeyBindings.Save()
-                rebindingAction_ = nil
+                _rebindingAction = nil
             end
             return true
         end
         if key == KEY_ESCAPE then
-            showSettings_ = false
+            _showSettings = false
         end
         return true
     end
 
-    if showLeaderboard_ then
+    if _showLeaderboard then
         if key == KEY_ESCAPE then
-            showLeaderboard_ = false
+            _showLeaderboard = false
         end
         return true
     end
@@ -138,8 +138,8 @@ end
 
 --- 设置面板内的点击处理
 function Panels.HandleSettingsClick(mx, my, screenW, screenH)
-    if rebindingAction_ then
-        rebindingAction_ = nil
+    if _rebindingAction then
+        _rebindingAction = nil
     end
 
     local margin = 12
@@ -162,7 +162,7 @@ function Panels.HandleSettingsClick(mx, my, screenW, screenH)
 
     -- ====== 环节时长按钮点击检测 ======
     local contentTop = py + 52
-    local curY = contentTop + 6 - settingsScroll_
+    local curY = contentTop + 6 - _settingsScroll
     curY = curY + 26  -- 跳过【环节时长】标题
 
     local btnW = 46
@@ -217,8 +217,8 @@ function Panels.HandleSettingsClick(mx, my, screenW, screenH)
         local keyBoxW = panelW * 0.42
         if mx >= keyBoxX and mx <= keyBoxX + keyBoxW and
            my >= rowY and my <= rowY + rowH then
-            rebindingAction_ = action.id
-            rebindFlash_ = 0
+            _rebindingAction = action.id
+            _rebindFlash = 0
             return
         end
 
@@ -231,14 +231,14 @@ end
 -- ============================================================================
 
 function Panels.Update(dt)
-    local targetSettings = showSettings_ and 1.0 or 0.0
-    settingsAnim_ = settingsAnim_ + (targetSettings - settingsAnim_) * dt * 8
+    local targetSettings = _showSettings and 1.0 or 0.0
+    _settingsAnim = _settingsAnim + (targetSettings - _settingsAnim) * dt * 8
 
-    local targetLb = showLeaderboard_ and 1.0 or 0.0
-    leaderboardAnim_ = leaderboardAnim_ + (targetLb - leaderboardAnim_) * dt * 8
+    local targetLb = _showLeaderboard and 1.0 or 0.0
+    _leaderboardAnim = _leaderboardAnim + (targetLb - _leaderboardAnim) * dt * 8
 
-    if rebindingAction_ then
-        rebindFlash_ = rebindFlash_ + dt * 6
+    if _rebindingAction then
+        _rebindFlash = _rebindFlash + dt * 6
     end
 end
 
@@ -247,9 +247,9 @@ end
 -- ============================================================================
 
 function Panels.FetchLeaderboard()
-    if menuLeaderboardLoading_ then return end
-    menuLeaderboardLoading_ = true
-    menuLeaderboardData_ = {}
+    if _menuLeaderboardLoading then return end
+    _menuLeaderboardLoading = true
+    _menuLeaderboardData = {}
     local cjson = require("cjson")
 
     clientCloud:Get("leaderboard_history", {
@@ -266,13 +266,13 @@ function Panels.FetchLeaderboard()
                 return a.damage < b.damage
             end)
             print("[MenuState] Leaderboard fetched from history, count=" .. #history)
-            menuLeaderboardData_ = history
-            menuLeaderboardLoading_ = false
+            _menuLeaderboardData = history
+            _menuLeaderboardLoading = false
         end,
         error = function(code, reason)
             print("[MenuState] Leaderboard error: " .. tostring(reason))
-            menuLeaderboardData_ = {}
-            menuLeaderboardLoading_ = false
+            _menuLeaderboardData = {}
+            _menuLeaderboardLoading = false
         end,
     })
 end
@@ -282,13 +282,13 @@ end
 -- ============================================================================
 
 function Panels.RenderSettings(vg, screenW, screenH)
-    local alpha = math.floor(settingsAnim_ * 255)
-    local panelScale = 0.9 + settingsAnim_ * 0.1
+    local alpha = math.floor(_settingsAnim * 255)
+    local panelScale = 0.9 + _settingsAnim * 0.1
 
     -- 全屏遮罩
     nvgBeginPath(vg)
     nvgRect(vg, 0, 0, screenW, screenH)
-    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(settingsAnim_ * 220)))
+    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(_settingsAnim * 220)))
     nvgFill(vg)
 
     -- 全屏面板尺寸
@@ -338,7 +338,7 @@ function Panels.RenderSettings(vg, screenW, screenH)
     local contentBottom = py + panelH - 60
     nvgScissor(vg, px, contentTop, panelW, contentBottom - contentTop)
 
-    local curY = contentTop + 6 - settingsScroll_
+    local curY = contentTop + 6 - _settingsScroll
 
     -- ====== 环节时长设置 ======
     nvgFontSize(vg, 15)
@@ -443,12 +443,12 @@ function Panels.RenderSettings(vg, screenW, screenH)
         local keyBoxH = rowH - 6
         local keyBoxY = rowY + 3
 
-        local isRebinding = (rebindingAction_ == action.id)
+        local isRebinding = (_rebindingAction == action.id)
 
         nvgBeginPath(vg)
         nvgRoundedRect(vg, keyBoxX, keyBoxY, keyBoxW, keyBoxH, 5)
         if isRebinding then
-            local flash = math.abs(math.sin(rebindFlash_))
+            local flash = math.abs(math.sin(_rebindFlash))
             nvgFillColor(vg, nvgRGBA(60, 50, 20, alpha))
             nvgFill(vg)
             nvgStrokeColor(vg, nvgRGBA(255, 200, 60, math.floor(alpha * (0.5 + flash * 0.5))))
@@ -508,13 +508,13 @@ function Panels.RenderSettings(vg, screenW, screenH)
 end
 
 function Panels.RenderLeaderboard(vg, screenW, screenH)
-    local alpha = math.floor(leaderboardAnim_ * 255)
-    local panelScale = 0.85 + leaderboardAnim_ * 0.15
+    local alpha = math.floor(_leaderboardAnim * 255)
+    local panelScale = 0.85 + _leaderboardAnim * 0.15
 
     -- 半透明遮罩
     nvgBeginPath(vg)
     nvgRect(vg, 0, 0, screenW, screenH)
-    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(leaderboardAnim_ * 180)))
+    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(_leaderboardAnim * 180)))
     nvgFill(vg)
 
     -- 面板尺寸
@@ -575,18 +575,18 @@ function Panels.RenderLeaderboard(vg, screenW, screenH)
     local rowY = headerY + 22
     local rowH = 28
 
-    if menuLeaderboardLoading_ then
+    if _menuLeaderboardLoading then
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
         nvgFontSize(vg, 14)
         nvgFillColor(vg, nvgRGBA(150, 160, 170, alpha))
         nvgText(vg, screenW / 2, rowY + 20, "加载中...", nil)
-    elseif #menuLeaderboardData_ == 0 then
+    elseif #_menuLeaderboardData == 0 then
         nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
         nvgFontSize(vg, 14)
         nvgFillColor(vg, nvgRGBA(150, 160, 170, alpha))
         nvgText(vg, screenW / 2, rowY + 20, "暂无数据", nil)
     else
-        for i, item in ipairs(menuLeaderboardData_) do
+        for i, item in ipairs(_menuLeaderboardData) do
             local y = rowY + (i - 1) * rowH
             if y + rowH > py + panelH - 40 then break end
 

@@ -56,20 +56,73 @@ local deflectWeaponAngle_ = 0
 local dummyWeapon_ = nil
 
 -- ============================================================================
--- 外部依赖引用（通过 Init 注入）
+-- 外部依赖引用（通过 Init 注入，分组管理）
 -- ============================================================================
-local ctx_ = nil  -- 游戏上下文
+local ctx_ = {
+    entities = nil,      -- 实体引用: { player, dummy, targets, hitEffects }
+    score = nil,         -- 分数接口: { getCombo, setCombo, getScore, setScore, getTotalDamage, setTotalDamage }
+    gameData = nil,      -- 游戏数据: { getGameData, getMaterialEffect, getMaterialAtkMod, getGrowthBonus, setGrowthBonus }
+    attacks = nil,       -- 攻击接口: { getAttacks, getDummyAttacks }
+    config = nil,        -- 配置接口: { getPhysScale, getScreenW }
+    state = nil,         -- 状态接口: { isTrialEnded }
+}
 
 -- ============================================================================
 -- 初始化
 -- ============================================================================
 
 --- 初始化战斗系统
---- @param ctx table 游戏上下文 { player, dummy, targets, hitEffects, getCombo, setCombo, getScore, setScore, getPhysScale, getScreenW, getGameData, getMaterialEffect, getMaterialAtkMod, getGrowthBonus, setGrowthBonus, getTotalDamage, setTotalDamage, getAttacks, isTrialEnded, getDummyAttacks }
+--- @param ctx table 游戏上下文（支持两种格式：旧格式兼容，新格式分组）
+--- 新格式: { entities, score, gameData, attacks, config, state }
+--- 旧格式: { player, dummy, targets, hitEffects, getCombo, setCombo, getScore, setScore, getPhysScale, getScreenW, getGameData, getMaterialEffect, getMaterialAtkMod, getGrowthBonus, setGrowthBonus, getTotalDamage, setTotalDamage, getAttacks, isTrialEnded, getDummyAttacks }
 function Combat.Init(ctx)
-    ctx_ = ctx
-    attacks_ = ctx.getAttacks()
-    dummyAttacks_ = ctx.getDummyAttacks()
+    -- 支持新旧两种格式
+    if ctx.entities then
+        -- 新格式：已分组
+        ctx_.entities = ctx.entities
+        ctx_.score = ctx.score
+        ctx_.gameData = ctx.gameData
+        ctx_.attacks = ctx.attacks
+        ctx_.config = ctx.config
+        ctx_.state = ctx.state
+    else
+        -- 旧格式：扁平结构，向后兼容
+        ctx_.entities = {
+            player = ctx.player,
+            dummy = ctx.dummy,
+            targets = ctx.targets,
+            hitEffects = ctx.hitEffects,
+        }
+        ctx_.score = {
+            getCombo = ctx.getCombo,
+            setCombo = ctx.setCombo,
+            getScore = ctx.getScore,
+            setScore = ctx.setScore,
+            getTotalDamage = ctx.getTotalDamage,
+            setTotalDamage = ctx.setTotalDamage,
+        }
+        ctx_.gameData = {
+            getGameData = ctx.getGameData,
+            getMaterialEffect = ctx.getMaterialEffect,
+            getMaterialAtkMod = ctx.getMaterialAtkMod,
+            getGrowthBonus = ctx.getGrowthBonus,
+            setGrowthBonus = ctx.setGrowthBonus,
+        }
+        ctx_.attacks = {
+            getAttacks = ctx.getAttacks,
+            getDummyAttacks = ctx.getDummyAttacks,
+        }
+        ctx_.config = {
+            getPhysScale = ctx.getPhysScale,
+            getScreenW = ctx.getScreenW,
+        }
+        ctx_.state = {
+            isTrialEnded = ctx.isTrialEnded,
+        }
+    end
+    
+    attacks_ = ctx_.attacks.getAttacks()
+    dummyAttacks_ = ctx_.attacks.getDummyAttacks()
     attacking_ = false
     attackTimer_ = 0
     attackDuration_ = 0
@@ -98,7 +151,7 @@ end
 
 --- 重新同步攻击组（变形后调用）
 function Combat.SyncAttacks()
-    attacks_ = ctx_.getAttacks()
+    attacks_ = ctx_.attacks.getAttacks()
 end
 
 -- ============================================================================
@@ -144,7 +197,7 @@ function Combat.GetDummyWeapon() return dummyWeapon_ end
 function Combat.StartAttack(index)
     if attacking_ then return end
     if #attacks_ == 0 then return end
-    if ctx_.isTrialEnded() then return end
+    if ctx_.state.isTrialEnded() then return end
 
     local idx = index or 1
     if idx > #attacks_ then idx = 1 end
@@ -152,9 +205,9 @@ function Combat.StartAttack(index)
     currentAttack_ = attacks_[idx]
     attacking_ = true
     attackTimer_ = 0
-    local gameData = ctx_.getGameData()
+    local gameData = ctx_.gameData.getGameData()
     local speedBonus = gameData.attackSpeedBonus or 0
-    local totalSpeedMod = speedBonus + ctx_.getMaterialSpdMod()
+    local totalSpeedMod = speedBonus + ctx_.gameData.getMaterialSpdMod()
     attackDuration_ = currentAttack_.duration * (1.0 - totalSpeedMod)
     attackHitTargets_ = {}
     attackHitDummy_ = false
@@ -176,7 +229,7 @@ function Combat.UpdateAttack(dt)
 
     -- 冲撞前移
     local player = ctx_.player
-    local physScale = ctx_.getPhysScale()
+    local physScale = ctx_.config.getPhysScale()
     if currentAttack_ and currentAttack_.isCharge then
         local dir = player.facingRight and 1 or -1
         local chargeDist = (currentAttack_.chargeDistance or 40) * physScale * dt / attackDuration_
@@ -258,11 +311,11 @@ end
 local function HitTarget(index, target, atk, dir)
     attackHitTargets_[index] = true
 
-    local materialEffect = ctx_.getMaterialEffect()
-    local materialAtkMod = ctx_.getMaterialAtkMod()
-    local growthBonus = ctx_.getGrowthBonus()
+    local materialEffect = ctx_.gameData.getMaterialEffect()
+    local materialAtkMod = ctx_.gameData.getMaterialAtkMod()
+    local growthBonus = ctx_.gameData.getGrowthBonus()
     local player = ctx_.player
-    local hitEffects = ctx_.hitEffects
+    local hitEffects = ctx_.entities.hitEffects
 
     local baseDmg = atk.damage or 150
     local dmg = math.floor(baseDmg * (1.0 + materialAtkMod) * (1.0 + growthBonus))
@@ -289,7 +342,7 @@ local function HitTarget(index, target, atk, dir)
 
     if materialEffect == "growth" then
         local newBonus = math.min(0.50, growthBonus + 0.05)
-        ctx_.setGrowthBonus(newBonus)
+        ctx_.gameData.setGrowthBonus(newBonus)
     end
 
     hitEffects[#hitEffects + 1] = {
@@ -299,15 +352,15 @@ local function HitTarget(index, target, atk, dir)
         color = dmg >= 200 and Config.Colors.Danger or { 255, 200, 100 },
     }
 
-    local combo = ctx_.getCombo()
+    local combo = ctx_.score.getCombo()
     if target.hp <= 0 then
         target.alive = false
         target.hp = 0
         target.hitAnim = 1.0
         combo = combo + 1
-        ctx_.setCombo(combo)
+        ctx_.score.setCombo(combo)
         local points = Config.Trial.ComboMultiplier * combo
-        ctx_.setScore(ctx_.getScore() + points)
+        ctx_.score.setScore(ctx_.score.getScore() + points)
         hitEffects[#hitEffects + 1] = {
             x = target.x, y = target.y - (target.size or 30) - 20,
             text = "+" .. points,
@@ -316,7 +369,7 @@ local function HitTarget(index, target, atk, dir)
         }
     else
         combo = combo + 1
-        ctx_.setCombo(combo)
+        ctx_.score.setCombo(combo)
     end
 end
 
@@ -325,8 +378,8 @@ function Combat.CheckAttackCollision(progress)
     if not currentAttack_ then return end
 
     local player = ctx_.player
-    local targets = ctx_.targets
-    local physScale = ctx_.getPhysScale()
+    local targets = ctx_.entities.targets
+    local physScale = ctx_.config.getPhysScale()
 
     local dir = player.facingRight and 1 or -1
     local originX = player.x + player.width / 2 + dir * 10 * physScale
@@ -384,8 +437,8 @@ function Combat.CheckDummyCollision(progress)
     if attackHitDummy_ then return end
 
     local player = ctx_.player
-    local physScale = ctx_.getPhysScale()
-    local hitEffects = ctx_.hitEffects
+    local physScale = ctx_.config.getPhysScale()
+    local hitEffects = ctx_.entities.hitEffects
 
     local atk = currentAttack_
     local dir = player.facingRight and 1 or -1
@@ -419,21 +472,21 @@ function Combat.CheckDummyCollision(progress)
         dummy.hitAnim = 1.0
         dummy.hitDir = dir
         local baseDmg = atk.damage or 150
-        local materialAtkMod = ctx_.getMaterialAtkMod()
-        local growthBonus = ctx_.getGrowthBonus()
+        local materialAtkMod = ctx_.gameData.getMaterialAtkMod()
+        local growthBonus = ctx_.gameData.getGrowthBonus()
         local dmg = math.floor(baseDmg * (1.0 + materialAtkMod) * (1.0 + growthBonus))
         dummy.hp = math.max(0, dummy.hp - dmg)
-        local totalDmg = ctx_.getTotalDamage() + dmg
-        ctx_.setTotalDamage(totalDmg)
+        local totalDmg = ctx_.score.getTotalDamage() + dmg
+        ctx_.score.setTotalDamage(totalDmg)
         hitEffects[#hitEffects + 1] = {
             x = dCx, y = dCy - dummy.height * 0.6,
             text = "-" .. dmg,
             timer = Config.Combat.DamageNumberDuration,
             color = dmg >= 200 and Config.Colors.Danger or { 255, 200, 100 },
         }
-        local combo = ctx_.getCombo() + 1
-        ctx_.setCombo(combo)
-        ctx_.setScore(ctx_.getScore() + Config.Trial.ComboMultiplier * combo)
+        local combo = ctx_.score.getCombo() + 1
+        ctx_.score.setCombo(combo)
+        ctx_.score.setScore(ctx_.score.getScore() + Config.Trial.ComboMultiplier * combo)
     end
 end
 
@@ -491,8 +544,8 @@ function Combat.UpdateDummyMovement(dt)
     if not dummy then return end
 
     local player = ctx_.player
-    local physScale = ctx_.getPhysScale()
-    local screenW = ctx_.getScreenW()
+    local physScale = ctx_.config.getPhysScale()
+    local screenW = ctx_.config.getScreenW()
 
     local distToPlayer = math.abs(player.x - dummy.x)
     local atkRange = Config.Combat.DummyAttackRange * physScale
@@ -523,9 +576,9 @@ function Combat.CheckDummyAttackHitPlayer()
     if not dummy then return end
 
     local player = ctx_.player
-    local physScale = ctx_.getPhysScale()
-    local hitEffects = ctx_.hitEffects
-    local materialEffect = ctx_.getMaterialEffect()
+    local physScale = ctx_.config.getPhysScale()
+    local hitEffects = ctx_.entities.hitEffects
+    local materialEffect = ctx_.gameData.getMaterialEffect()
 
     local atk = dummyCurrentAttack_
     local dir = dummyFacingRight_ and 1 or -1
@@ -633,7 +686,7 @@ function Combat.UpdateDummyWeapon(dt)
     local dummy = ctx_.dummy
     if not dummy then return end
 
-    local physScale = ctx_.getPhysScale()
+    local physScale = ctx_.config.getPhysScale()
     local dw = dummyWeapon_
     local dh = dummy.height
 
@@ -687,7 +740,7 @@ function Combat.GetPlayerWeaponCollider(progress)
     if not attacking_ or not currentAttack_ then return nil end
 
     local player = ctx_.player
-    local physScale = ctx_.getPhysScale()
+    local physScale = ctx_.config.getPhysScale()
     local atk = currentAttack_
     local dir = player.facingRight and 1 or -1
     local originX = player.x + player.width / 2 + dir * 10 * physScale
@@ -734,10 +787,10 @@ function Combat.CheckWeaponClash(progress)
     if not playerWeapon then return end
 
     local dw = dummyWeapon_
-    local physScale = ctx_.getPhysScale()
+    local physScale = ctx_.config.getPhysScale()
     local player = ctx_.player
-    local hitEffects = ctx_.hitEffects
-    local gameData = ctx_.getGameData()
+    local hitEffects = ctx_.entities.hitEffects
+    local gameData = ctx_.gameData.getGameData()
 
     local dist = SegmentToSegmentDist(
         playerWeapon.rootX, playerWeapon.rootY, playerWeapon.tipX, playerWeapon.tipY,

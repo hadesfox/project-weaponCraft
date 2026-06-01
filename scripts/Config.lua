@@ -43,6 +43,7 @@ Config.WeaponTypes = {
 
 -- 锻造配置
 Config.Forge = {
+    MaterialDuration = 5.0,   -- 选材阶段时长（秒）
     HammerDuration = 5.0,    -- 锤击阶段时长（秒）
     QuenchDuration = 5.0,    -- 淬火阶段时长（秒）
     PerfectHalf = 0.10,      -- 完美判定区域半宽（占节奏条比例）
