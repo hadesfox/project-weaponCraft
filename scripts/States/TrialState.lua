@@ -1,5 +1,6 @@
 -- ============================================================================
 -- States/TrialState.lua - 试炼场（横版）
+-- 战斗系统已抽取至 Trial/Combat.lua，末屏已抽取至 Trial/EndScreen.lua
 -- 横版动作：左右移动 + 跳跃 + 武器攻击
 -- PC: AD/方向键移动, 空格跳跃, 鼠标/J键攻击, Q键变形
 -- 移动端: 左侧方向按钮, 右侧跳跃+攻击按钮, 左下变形按钮
@@ -14,6 +15,8 @@ local GameSettings = require("GameSettings")
 local Slime = require("Trial.Slime")
 local Renderer = require("Trial.Renderer")
 local VirtualPad = require("Trial.VirtualPad")
+local Combat = require("Trial.Combat")
+local EndScreen = require("Trial.EndScreen")
 
 local TrialState = {}
 
@@ -43,15 +46,8 @@ local dropThrough_ = 0  -- 下落穿透计时器（秒），>0 时忽略平台�
 
 -- 虚拟操控（手机端）由 Trial.VirtualPad 模块提供
 
--- ============================================================================
--- 攻击系统
--- ============================================================================
+-- 攻击系统 → Trial/Combat.lua
 local attacks_ = {}
-local attacking_ = false
-local attackTimer_ = 0
-local attackDuration_ = 0
-local currentAttack_ = nil
-local attackHitTargets_ = {}
 
 -- ============================================================================
 -- 变形系统（复合武器）
@@ -85,39 +81,8 @@ local hitEffects_ = {}
 local dummy_ = nil
 local dummyDef_ = nil
 
--- 木桩武器（预制，用于测试武器碰撞）
-local dummyWeapon_ = nil  -- { x, y, angle, length, width, force, forceDir }
-
--- 木桩攻击系统（使用玩家同款攻击模组）
-local dummyAttacking_ = false
-local dummyAttackTimer_ = 0
-local dummyAttackDuration_ = 0
-local dummyCurrentAttack_ = nil
-local dummyAttackCooldown_ = 0       -- 攻击间隔冷却
-local dummyAttackProgress_ = 0       -- 当前攻击进度 0~1
-local dummyFacingRight_ = false      -- 木桩面朝方向（朝向玩家）
-local DUMMY_ATTACK_INTERVAL_MIN = 0.15 -- 最短攻击间隔（秒）
-local DUMMY_ATTACK_INTERVAL_MAX = 0.35 -- 最长攻击间隔（秒）
-local dummyHitPlayer_ = false        -- 本次攻击是否已命中玩家
+-- 木桩攻击/武器碰撞/格挡弹开 → Trial/Combat.lua
 local dummyAttacks_ = {}             -- 锻造师专用攻击组（斧）
-local dummyMoving_ = false           -- 锻造师是否在移动
-local dummyVx_ = 0                   -- 锻造师水平速度
-
--- 武器碰撞系统
-local weaponClashAnim_ = 0      -- 武器碰撞特效计时
-local weaponClashX_ = 0         -- 碰撞特效位置 X
-local weaponClashY_ = 0         -- 碰撞特效位置 Y
-local weaponClashCooldown_ = 0  -- 碰撞检测冷却
-
--- 格挡弹开系统（武器被弹飞动画）
-local deflecting_ = false       -- 是否正在弹开
-local deflectTimer_ = 0         -- 弹开计时
-local deflectDuration_ = 0.4    -- 弹开动画持续时间
-local deflectStartX_ = 0        -- 弹开起始位置 X
-local deflectStartY_ = 0        -- 弹开起始位置 Y
-local deflectAngle_ = 0         -- 弹开方向角度
-local deflectSpin_ = 0          -- 武器旋转速度（弧度/秒）
-local deflectWeaponAngle_ = 0   -- 弹开时武器初始角度
 
 -- 材质效果系统
 local materialEffect_ = nil     -- 当前材质效果ID（字符串）
@@ -156,20 +121,9 @@ local trialTimeLimit_ = 60         -- 时间限制
 local trialTotalDamage_ = 0        -- 累计对锻造师造成的伤害
 local trialEnded_ = false          -- 试炼是否已结束
 local trialEndReason_ = ""         -- 结束原因: "kill" / "timeout"
-local attackHitDummy_ = false      -- 当前攻击是否已命中锻造师（防止重复伤害）
+-- attackHitDummy_ → Combat 模块内部管理
 
--- 结算 UI 状态
-local showEndScreen_ = false       -- 是否显示结算画面
-local endScreenPhase_ = "input"    -- "input" / "submitting" / "leaderboard"
-local playerInputId_ = ""          -- 玩家输入的ID
-local leaderboardData_ = {}        -- 排行榜数据
-local myRank_ = nil                -- 我的排名
-
--- 结算视频状态
-local endVideoPlaying_ = false     -- 是否正在播放结算视频
-local endVideoPlayer_ = nil        -- VideoPlayer 引用
-local WIN_VIDEO_PATH  = "video/1780205172944-167941.mp4"
-local LOSE_VIDEO_PATH = "video/1780204189075-776175.mp4"
+-- 结算 UI → EndScreen 模块管理
 
 -- 内部函数前向声明
 local PrepareWeaponStrokes
@@ -183,33 +137,15 @@ local RecalcTargets
 local UpdateInput
 local UpdatePlayerPhysics
 local DoJump
-local StartAttack
-local UpdateAttack
-local CheckAttackCollision
-local CheckDummyCollision
-local GetThrustLength
-local HitTarget
-local PointToSegmentDist
+-- 攻击/碰撞/木桩AI/武器格挡 → Combat.StartAttack / Combat.Update* 等
 local UpdateTargets
 local UpdateCombo
 local UpdateHitEffects
 local UpdateTransformAnim
 local CheckWaveClear
 local UpdateHUD
-local InitDummyWeapon
-local UpdateDummyWeapon
-local UpdateDummyAttack
-local UpdateDummyMovement
-local CheckDummyAttackHitPlayer
-local CheckWeaponClash
-local GetPlayerWeaponCollider
-local UpdateWeaponClash
 
-local PlayEndVideo
-local ShowEndScreen
-local SubmitScore
-local FetchLeaderboard
-local BuildLeaderboardUI
+-- PlayEndVideo / ShowEndScreen / SubmitScore / FetchLeaderboard → EndScreen 模块
 
 --- 进入试炼状态
 function TrialState.Enter(gameData, onComplete)
@@ -220,14 +156,14 @@ function TrialState.Enter(gameData, onComplete)
     VirtualPad.Init()
     VirtualPad.SetCallbacks({
         onJump = function() DoJump() end,
-        onAttack1 = function() StartAttack(1) end,
-        onAttack2 = function() StartAttack(2) end,
+        onAttack1 = function() Combat.StartAttack(1) end,
+        onAttack2 = function() Combat.StartAttack(2) end,
         onDown = function()
             inputDown_ = true
             if player_.onGround then dropThrough_ = 0.2 end
         end,
         onDownRelease = function() inputDown_ = false end,
-        onDefaultAttack = function() StartAttack(1) end,
+        onDefaultAttack = function() Combat.StartAttack(1) end,
     })
     
     screenW_ = graphics:GetWidth() / graphics:GetDPR()
@@ -283,12 +219,15 @@ function TrialState.Enter(gameData, onComplete)
     trialTotalDamage_ = 0
     trialEnded_ = false
     trialEndReason_ = ""
-    attackHitDummy_ = false
-    showEndScreen_ = false
-    endScreenPhase_ = "input"
-    playerInputId_ = ""
-    leaderboardData_ = {}
-    myRank_ = nil
+    EndScreen.Init({
+        getTrialTimer = function() return trialTimer_ end,
+        getTotalDamage = function() return trialTotalDamage_ end,
+        getEndReason = function() return trialEndReason_ end,
+        getCombo = function() return combo_ end,
+        getUIRoot = function() return uiRoot_ end,
+        setUIRoot = function(root) uiRoot_ = root end,
+        onComplete = function() if onComplete_ then onComplete_() end end,
+    })
     
     -- 输入重置
     inputLeft_ = false
@@ -319,17 +258,31 @@ function TrialState.Enter(gameData, onComplete)
     -- 初始化史莱姆
     Slime.Init(screenW_, screenH_, groundY_, physScale_)
     
-    -- 初始化木桩武器和碰撞系统
-    weaponClashAnim_ = 0
-    weaponClashCooldown_ = 0
-    deflecting_ = false
-    deflectTimer_ = 0
-    InitDummyWeapon()
-    
-    -- 锻造师使用斧攻击组（独立于玩家武器）
+    -- 初始化战斗系统（攻击、木桩AI、武器碰撞）
     dummyAttacks_ = Config.Attacks.AXE
-    dummyMoving_ = false
-    dummyVx_ = 0
+    Combat.Init({
+        player = player_,
+        dummy = dummy_,
+        targets = targets_,
+        hitEffects = hitEffects_,
+        getCombo = function() return combo_ end,
+        setCombo = function(v) combo_ = v; comboTimer_ = 0 end,
+        getScore = function() return score_ end,
+        setScore = function(v) score_ = v end,
+        getPhysScale = function() return physScale_ end,
+        getScreenW = function() return screenW_ end,
+        getGameData = function() return gameData_ end,
+        getMaterialEffect = function() return materialEffect_ end,
+        getMaterialAtkMod = function() return materialAtkMod_ end,
+        getMaterialSpdMod = function() return materialSpdMod_ end,
+        getGrowthBonus = function() return growthBonus_ end,
+        setGrowthBonus = function(v) growthBonus_ = v end,
+        getTotalDamage = function() return trialTotalDamage_ end,
+        setTotalDamage = function(v) trialTotalDamage_ = v end,
+        getAttacks = function() return attacks_ end,
+        getDummyAttacks = function() return dummyAttacks_ end,
+        isTrialEnded = function() return trialEnded_ end,
+    })
     
     local weaponType = gameData_.weaponData and gameData_.weaponData.type or "UNKNOWN"
     print("[TrialState] Entered. Weapon: " .. weaponType .. " Composite: " .. tostring(isComposite_))
@@ -479,8 +432,7 @@ SetupTransformSystem = function()
         formNames_[1] = (Config.WeaponTypes[weaponType] or Config.WeaponTypes.UNKNOWN).name
     end
     
-    attacking_ = false
-    currentAttack_ = nil
+    Combat.StopAttack()
 end
 
 --- 根据主武器类型获取互补类型
@@ -499,11 +451,12 @@ end
 --- 执行变形
 DoTransform = function()
     if not isComposite_ then return end
-    if attacking_ then return end  -- 攻击中不可变形
+    if Combat.IsAttacking() then return end  -- 攻击中不可变形
     
     -- 切换形态
     currentForm_ = currentForm_ == 1 and 2 or 1
     attacks_ = formAttacks_[currentForm_]
+    Combat.SyncAttacks()
     transformAnim_ = 1.0  -- 触发变形动画
     
     -- 切换武器图案（核心：使用对应形态的闭合结构笔画）
@@ -546,30 +499,19 @@ function TrialState.Leave()
     platformDefs_ = {}
     targetDefs_ = {}
     attacks_ = {}
-    attackHitTargets_ = {}
     hitEffects_ = {}
     weaponStrokes_ = {}
     formAttacks_ = { {}, {} }
     formStrokes_ = { {}, {} }
     dummyAttacks_ = {}
-    leaderboardData_ = {}
 
-    -- ④ 释放视频播放器
-    if endVideoPlayer_ then
-        endVideoPlayer_:Destroy()
-        endVideoPlayer_ = nil
-    end
-    endVideoPlaying_ = false
+    -- ④ 释放视频播放器 + 结算画面
+    EndScreen.Reset()
 
     -- ⑤ 重置状态标志
-    attacking_ = false
     trialEnded_ = false
-    showEndScreen_ = false
-    dummyAttacking_ = false
-    deflecting_ = false
     dummy_ = nil
     dummyDef_ = nil
-    dummyWeapon_ = nil
     materialEffect_ = nil
     uiRoot_ = nil
     gameData_ = nil
@@ -854,9 +796,8 @@ function TrialState.Update(dt)
         trialTimer_ = trialTimeLimit_
         trialEnded_ = true
         trialEndReason_ = "timeout"
-        attacking_ = false
-        currentAttack_ = nil
-        PlayEndVideo()
+        Combat.StopAttack()
+        EndScreen.PlayEndVideo()
         return
     end
     
@@ -864,19 +805,18 @@ function TrialState.Update(dt)
     if player_.hp <= 0 and not trialEnded_ then
         trialEnded_ = true
         trialEndReason_ = "defeated"
-        attacking_ = false
-        currentAttack_ = nil
-        PlayEndVideo()
+        Combat.StopAttack()
+        EndScreen.PlayEndVideo()
         return
     end
     
     UpdateInput()
     UpdatePlayerPhysics(dt)
-    UpdateAttack(dt)
+    Combat.UpdateAttack(dt)
     UpdateTargets(dt)
-    UpdateDummyAttack(dt)
-    UpdateDummyWeapon(dt)
-    UpdateWeaponClash(dt)
+    Combat.UpdateDummyAttack(dt)
+    Combat.UpdateDummyWeapon(dt)
+    Combat.UpdateWeaponClash(dt)
     Slime.Update(dt, player_)
     UpdateCombo(dt)
     UpdateHitEffects(dt)
@@ -910,9 +850,8 @@ function TrialState.Update(dt)
     if dummy_ and dummy_.hp <= 0 and not trialEnded_ then
         trialEnded_ = true
         trialEndReason_ = "kill"
-        attacking_ = false
-        currentAttack_ = nil
-        PlayEndVideo()
+        Combat.StopAttack()
+        EndScreen.PlayEndVideo()
         return
     end
     
@@ -937,16 +876,16 @@ end
 UpdatePlayerPhysics = function(dt)
     local speed = Config.Trial.MoveSpeed * physScale_
     -- agile 效果：攻击时移速不减；否则攻击时清零
-    if attacking_ and materialEffect_ ~= "agile" then
+    if Combat.IsAttacking() and materialEffect_ ~= "agile" then
         speed = 0
     end
     
     if inputLeft_ then
         player_.vx = -speed
-        if not attacking_ then player_.facingRight = false end
+        if not Combat.IsAttacking() then player_.facingRight = false end
     elseif inputRight_ then
         player_.vx = speed
-        if not attacking_ then player_.facingRight = true end
+        if not Combat.IsAttacking() then player_.facingRight = true end
     else
         player_.vx = 0
     end
@@ -1070,258 +1009,6 @@ DoJump = function()
     end
 end
 
---- 发起攻击
---- @param index number|nil 攻击索引（1=左键招式, 2=右键招式），nil时默认为1
-StartAttack = function(index)
-    if attacking_ then return end
-    if #attacks_ == 0 then return end
-    if trialEnded_ then return end  -- 试炼结束后不可攻击
-    
-    local idx = index or 1
-    if idx > #attacks_ then idx = 1 end
-    
-    currentAttack_ = attacks_[idx]
-    attacking_ = true
-    attackTimer_ = 0
-    -- 砥砺攻速加成：降低攻击持续时间（加成范围 0%~30%）
-    local speedBonus = gameData_.attackSpeedBonus or 0
-    -- 材质攻速修正：spdMod 正值加速（缩短持续时间），负值减速
-    local totalSpeedMod = speedBonus + materialSpdMod_
-    attackDuration_ = currentAttack_.duration * (1.0 - totalSpeedMod)
-    attackHitTargets_ = {}
-    attackHitDummy_ = false  -- 新攻击重置木桩命中标记
-end
-
---- 攻击更新
-UpdateAttack = function(dt)
-    if not attacking_ then return end
-    
-    attackTimer_ = attackTimer_ + dt
-    local progress = attackTimer_ / attackDuration_
-    
-    if progress >= 1.0 then
-        attacking_ = false
-        currentAttack_ = nil
-        attackHitTargets_ = {}
-        return
-    end
-    
-    -- 冲撞前移
-    if currentAttack_ and currentAttack_.isCharge then
-        local dir = player_.facingRight and 1 or -1
-        local chargeDist = (currentAttack_.chargeDistance or 40) * physScale_ * dt / attackDuration_
-        player_.x = player_.x + dir * chargeDist
-    end
-    
-    CheckAttackCollision(progress)
-end
-
---- 碰撞检测
-CheckAttackCollision = function(progress)
-    if not currentAttack_ then return end
-    
-    local atk = currentAttack_
-    local dir = player_.facingRight and 1 or -1
-    local originX = player_.x + player_.width / 2 + dir * 10 * physScale_
-    local originY = player_.y + player_.height * 0.4
-    local range = atk.range * physScale_
-    
-    if atk.isThrust then
-        local thrustLen = GetThrustLength(progress)
-        local tipX = originX + dir * thrustLen
-        local tipY = originY
-        
-        for i = 1, #targets_ do
-            local t = targets_[i]
-            if t.alive and not attackHitTargets_[i] then
-                local dist = PointToSegmentDist(t.x, t.y, originX, originY, tipX, tipY)
-                local hr = t.hitRadius or (t.size / 2)
-                if dist < hr + 12 then
-                    HitTarget(i, t, atk, dir)
-                end
-            end
-        end
-    else
-        local easedProgress = 1.0 - (1.0 - progress) * (1.0 - progress)
-        for i = 1, #targets_ do
-            local t = targets_[i]
-            if t.alive and not attackHitTargets_[i] then
-                local dx = t.x - originX
-                local dy = t.y - originY
-                local dist = math.sqrt(dx * dx + dy * dy)
-                local hr = t.hitRadius or (t.size / 2)
-                if dist < range + hr then
-                    -- 判断目标是否在角色面朝方向的前方
-                    local inFront = (player_.facingRight and dx > -20) or (not player_.facingRight and dx < 20)
-                    local vertOk = math.abs(dy) < range * 0.8
-                    if inFront and vertOk then
-                        HitTarget(i, t, atk, dir)
-                    end
-                end
-            end
-        end
-    end
-    
-    -- 先检测武器间碰撞（格挡判定优先）
-    CheckWeaponClash(progress)
-    
-    -- 如果未被格挡，才检测木桩碰撞造成伤害
-    if not deflecting_ then
-        CheckDummyCollision(progress)
-    end
-end
-
---- 检测木桩碰撞
-CheckDummyCollision = function(progress)
-    if not dummy_ or not currentAttack_ then return end
-    if attackHitDummy_ then return end  -- 本次攻击已命中，不再重复判定
-    
-    local atk = currentAttack_
-    local dir = player_.facingRight and 1 or -1
-    local originX = player_.x + player_.width / 2 + dir * 10 * physScale_
-    local originY = player_.y + player_.height * 0.4
-    local range = atk.range * physScale_
-    
-    -- 木桩中心
-    local dCx = dummy_.x
-    local dCy = dummy_.y - dummy_.height / 2
-    local dRadius = dummy_.width / 2 + 10
-    
-    local hit = false
-    if atk.isThrust then
-        local thrustLen = GetThrustLength(progress)
-        local tipX = originX + dir * thrustLen
-        local dist = PointToSegmentDist(dCx, dCy, originX, originY, tipX, originY)
-        hit = dist < dRadius + 8
-    else
-        local dx = dCx - originX
-        local dy = dCy - originY
-        local dist = math.sqrt(dx * dx + dy * dy)
-        if dist < range + dRadius then
-            local inFront = (player_.facingRight and dx > -20) or (not player_.facingRight and dx < 20)
-            hit = inFront and math.abs(dy) < range * 0.8
-        end
-    end
-    
-    if hit then
-        attackHitDummy_ = true  -- 标记本次攻击已命中
-        dummy_.hitAnim = 1.0
-        dummy_.hitDir = dir
-        -- 扣血（应用材质攻击力修正 + 成长加成）
-        local baseDmg = atk.damage or 150
-        local dmg = math.floor(baseDmg * (1.0 + materialAtkMod_) * (1.0 + growthBonus_))
-        dummy_.hp = math.max(0, dummy_.hp - dmg)
-        trialTotalDamage_ = trialTotalDamage_ + dmg
-        -- 伤害数字
-        hitEffects_[#hitEffects_ + 1] = {
-            x = dCx, y = dCy - dummy_.height * 0.6,
-            text = "-" .. dmg,
-            timer = Config.Combat.DamageNumberDuration,
-            color = dmg >= 200 and Config.Colors.Danger or { 255, 200, 100 },
-        }
-        -- 连击
-        combo_ = combo_ + 1
-        comboTimer_ = 0
-        score_ = score_ + Config.Trial.ComboMultiplier * combo_
-    end
-end
-
---- 突刺延伸长度
-GetThrustLength = function(progress)
-    if not currentAttack_ then return 60 * physScale_ end
-    local len = currentAttack_.range * physScale_
-    if progress < 0.3 then
-        return len * (progress / 0.3)
-    elseif progress < 0.7 then
-        return len
-    else
-        return len * (1.0 - (progress - 0.7) / 0.3)
-    end
-end
-
---- 命中靶子（HP伤害系统）
-HitTarget = function(index, target, atk, dir)
-    attackHitTargets_[index] = true
-    
-    -- 计算伤害（应用材质攻击力修正 + 成长加成）
-    local baseDmg = atk.damage or 150
-    local dmg = math.floor(baseDmg * (1.0 + materialAtkMod_) * (1.0 + growthBonus_))
-    target.hp = target.hp - dmg
-    target.hitAnim = 0.5  -- 受击闪烁
-    
-    -- 击退（heavy_blow: 击退距离+50%）
-    local kb = atk.knockback or 8
-    if materialEffect_ == "heavy_blow" then
-        kb = kb * 1.5
-    end
-    target.knockX = dir * math.abs(kb)
-    target.knockY = -math.abs(kb) * 0.5
-    
-    -- 材质效果：lifesteal（嗜血）- 伤害15%回血显示
-    if materialEffect_ == "lifesteal" then
-        local healAmt = math.floor(dmg * 0.15)
-        hitEffects_[#hitEffects_ + 1] = {
-            x = player_.x, y = player_.y - 10,
-            text = "+" .. healAmt,
-            timer = 0.8,
-            color = { 80, 255, 80 },
-        }
-        -- 回复效果：减少下次受击的击退量（存储一个护盾值）
-        player_.healShield = (player_.healShield or 0) + healAmt * 0.3
-    end
-    
-    -- 材质效果：growth（成长）- 每次命中增加5%伤害，上限50%
-    if materialEffect_ == "growth" then
-        growthBonus_ = math.min(0.50, growthBonus_ + 0.05)
-    end
-    
-    -- 显示伤害数字
-    hitEffects_[#hitEffects_ + 1] = {
-        x = target.x, y = target.y - (target.size or 30),
-        text = "-" .. dmg,
-        timer = Config.Combat.DamageNumberDuration,
-        color = dmg >= 200 and Config.Colors.Danger or { 255, 200, 100 },
-    }
-    
-    -- 判定死亡
-    if target.hp <= 0 then
-        target.alive = false
-        target.hp = 0
-        target.hitAnim = 1.0
-        
-        -- 击杀奖励
-        combo_ = combo_ + 1
-        comboTimer_ = 0
-        local points = Config.Trial.ComboMultiplier * combo_
-        score_ = score_ + points
-        
-        hitEffects_[#hitEffects_ + 1] = {
-            x = target.x, y = target.y - (target.size or 30) - 20,
-            text = "+" .. points,
-            timer = 1.0,
-            color = combo_ >= 5 and Config.Colors.Gold or Config.Colors.Success,
-        }
-    else
-        -- 未击杀时也增加连击
-        combo_ = combo_ + 1
-        comboTimer_ = 0
-    end
-end
-
---- 点到线段距离
-PointToSegmentDist = function(px, py, ax, ay, bx, by)
-    local abx = bx - ax
-    local aby = by - ay
-    local apx = px - ax
-    local apy = py - ay
-    local ab2 = abx * abx + aby * aby
-    if ab2 < 0.01 then return math.sqrt(apx * apx + apy * apy) end
-    local t = math.max(0, math.min(1, (apx * abx + apy * aby) / ab2))
-    local cx = ax + t * abx
-    local cy = ay + t * aby
-    return math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy))
-end
-
 --- 靶子动画更新
 UpdateTargets = function(dt)
     for i = 1, #targets_ do
@@ -1401,8 +1088,9 @@ UpdateHUD = function()
     end
     
     local attackLabel = uiRoot_:FindById("trialAttackLabel")
-    if attackLabel and currentAttack_ then
-        attackLabel:SetText("招式: " .. currentAttack_.name)
+    local curAtk = Combat.GetCurrentAttack()
+    if attackLabel and curAtk then
+        attackLabel:SetText("招式: " .. curAtk.name)
     end
     
     -- 倒计时
@@ -1423,396 +1111,6 @@ UpdateHUD = function()
 end
 
 -- ============================================================================
--- 结算视频 + 结算画面
--- ============================================================================
-
---- 播放结算视频（胜利/失败），播放完毕后进入结算画面
-PlayEndVideo = function()
-    -- 如果视频不支持则直接跳到结算画面
-    if not Video.isSupported then
-        ShowEndScreen()
-        return
-    end
-
-    endVideoPlaying_ = true
-
-    local videoPath = trialEndReason_ == "kill" and WIN_VIDEO_PATH or LOSE_VIDEO_PATH
-
-    local function onVideoFinished()
-        if not endVideoPlaying_ then return end
-        endVideoPlaying_ = false
-        if endVideoPlayer_ then
-            endVideoPlayer_:Destroy()
-            endVideoPlayer_ = nil
-        end
-        ShowEndScreen()
-    end
-
-    -- 全屏视频 + 跳过按钮
-    endVideoPlayer_ = Video.VideoPlayer {
-        id = "endVideo",
-        src = videoPath,
-        width = "100%",
-        height = "100%",
-        autoPlay = true,
-        loop = false,
-        objectFit = "cover",
-        backgroundColor = { 0, 0, 0, 255 },
-        onEnded = function(self)
-            onVideoFinished()
-        end,
-        onLoadError = function(self, errorCode, errorName)
-            print("[Trial] End video load failed: " .. tostring(errorName) .. ", skipping to end screen")
-            onVideoFinished()
-        end,
-        children = {
-            -- 右上角跳过按钮
-            UI.Panel {
-                position = "absolute",
-                top = 20, right = 20,
-                children = {
-                    UI.Button {
-                        text = "跳过 >>",
-                        size = "small",
-                        variant = "outline",
-                        onClick = function()
-                            onVideoFinished()
-                        end,
-                    },
-                },
-            },
-        },
-    }
-
-    local videoRoot = UI.Panel {
-        width = "100%", height = "100%",
-        backgroundColor = { 0, 0, 0, 255 },
-        children = { endVideoPlayer_ },
-    }
-
-    uiRoot_ = videoRoot
-    UI.SetRoot(uiRoot_)
-end
-
---- 显示结算画面（替换 UI 为结算面板）
---- 左侧：击败信息 + 玩家输入提交
---- 右侧：排行榜
-ShowEndScreen = function()
-    showEndScreen_ = true
-    endScreenPhase_ = "input"
-    playerInputId_ = ""
-
-    -- 计算用时（秒，取整）
-    local timeUsed = math.ceil(trialTimer_)
-    local reasonText = trialEndReason_ == "kill" and "锻造师被击败!"
-        or trialEndReason_ == "defeated" and "你被击败了!" or "时间到!"
-    local borderColor = trialEndReason_ == "kill" and Config.Colors.Gold or { 200, 80, 80, 255 }
-
-    -- 左侧：结算信息 + 名字输入
-    local inputField = UI.TextField {
-        id = "endPlayerInput",
-        placeholder = "输入你的昵称",
-        value = "",
-        maxLength = 12,
-        width = "100%",
-        height = 36,
-        fontSize = 14,
-        onChange = function(self, val)
-            playerInputId_ = val
-        end,
-    }
-
-    local submitBtn = UI.Button {
-        id = "endSubmitBtn",
-        text = "提交成绩",
-        variant = "primary",
-        width = "100%",
-        onClick = function(self)
-            if #playerInputId_ == 0 then return end
-            self:SetDisabled(true)
-            endScreenPhase_ = "submitting"
-            SubmitScore(timeUsed)
-        end,
-    }
-
-    local leftPanel = UI.Panel {
-        flex = 1,
-        padding = 20, gap = 12,
-        backgroundColor = { 30, 32, 42, 255 },
-        borderRadius = 14,
-        borderWidth = 2,
-        borderColor = borderColor,
-        alignItems = "center",
-        justifyContent = "center",
-        children = {
-            -- 标题
-            UI.Label {
-                text = reasonText,
-                fontSize = 20,
-                fontColor = trialEndReason_ == "kill" and Config.Colors.Gold or { 240, 100, 100, 255 },
-            },
-            -- 战绩信息
-            UI.Panel {
-                width = "100%", gap = 6,
-                children = {
-                    UI.Panel {
-                        width = "100%", flexDirection = "row", justifyContent = "space-between",
-                        children = {
-                            UI.Label { text = "用时", fontSize = 14, fontColor = { 160, 170, 180, 255 } },
-                            UI.Label { text = timeUsed .. " 秒", fontSize = 14, fontColor = Config.Colors.TextLight },
-                        },
-                    },
-                    UI.Panel {
-                        width = "100%", flexDirection = "row", justifyContent = "space-between",
-                        children = {
-                            UI.Label { text = "总伤害", fontSize = 14, fontColor = { 160, 170, 180, 255 } },
-                            UI.Label { text = tostring(trialTotalDamage_), fontSize = 14, fontColor = { 255, 180, 80, 255 } },
-                        },
-                    },
-                    UI.Panel {
-                        width = "100%", flexDirection = "row", justifyContent = "space-between",
-                        children = {
-                            UI.Label { text = "最高连击", fontSize = 14, fontColor = { 160, 170, 180, 255 } },
-                            UI.Label { text = tostring(combo_), fontSize = 14, fontColor = Config.Colors.Secondary },
-                        },
-                    },
-                },
-            },
-            -- 分割线
-            UI.Panel { width = "80%", height = 1, backgroundColor = { 60, 60, 70, 150 } },
-            -- 输入昵称
-            UI.Label {
-                text = "输入你的名字上榜:",
-                fontSize = 12,
-                fontColor = { 140, 150, 160, 220 },
-            },
-            inputField,
-            submitBtn,
-            -- 返回菜单按钮
-            UI.Button {
-                text = "返回菜单",
-                size = "small",
-                variant = "outline",
-                marginTop = 8,
-                width = "100%",
-                onClick = function()
-                    if onComplete_ then onComplete_() end
-                end,
-            },
-        },
-    }
-
-    -- 右侧：排行榜
-    local leaderboardPanel = UI.Panel {
-        id = "endLeaderboard",
-        width = "100%",
-        gap = 4,
-        children = {},
-    }
-
-    local rightPanel = UI.Panel {
-        flex = 1,
-        padding = 20, gap = 10,
-        backgroundColor = { 25, 28, 38, 255 },
-        borderRadius = 14,
-        borderWidth = 1,
-        borderColor = { 80, 80, 100, 180 },
-        children = {
-            UI.Label {
-                text = "排行榜 (用时优先)",
-                fontSize = 16,
-                fontColor = Config.Colors.Gold,
-                marginBottom = 6,
-            },
-            leaderboardPanel,
-        },
-    }
-
-    local endRoot = UI.Panel {
-        width = "100%", height = "100%",
-        backgroundColor = { 10, 12, 20, 230 },
-        justifyContent = "center",
-        alignItems = "center",
-        padding = 20,
-        children = {
-            UI.Panel {
-                width = "100%", maxWidth = 700,
-                height = "90%", maxHeight = 420,
-                flexDirection = "row",
-                gap = 16,
-                children = {
-                    leftPanel,
-                    rightPanel,
-                },
-            },
-        },
-    }
-
-    -- 替换整个 UI
-    uiRoot_ = endRoot
-    UI.SetRoot(uiRoot_)
-
-    -- 立即拉取排行榜数据显示在右侧
-    FetchLeaderboard()
-end
-
---- 提交分数到云排行榜
---- 排序规则：用时少优先(升序)，同时间伤害高优先
---- 使用复合分数: compositeScore = timeUsed * 100000 + (99999 - clampedDamage)
---- 这样升序排列时 → 时间小的在前；同时间伤害高的在前
-SubmitScore = function(timeUsed)
-    local cjson = require("cjson")
-
-    -- 新记录
-    local newEntry = {
-        name = playerInputId_,
-        time = timeUsed,
-        damage = trialTotalDamage_,
-        ts = os.time(),
-    }
-
-    -- 先拉取已有排行榜历史
-    clientCloud:Get("leaderboard_history", {
-        ok = function(values)
-            local history = {}
-            if values and values.leaderboard_history then
-                local ok2, decoded = pcall(cjson.decode, values.leaderboard_history)
-                if ok2 and type(decoded) == "table" then
-                    history = decoded
-                end
-            end
-            -- 追加新记录
-            history[#history + 1] = newEntry
-            -- 按复合分数排序（用时优先，伤害越少越好）
-            table.sort(history, function(a, b)
-                if a.time ~= b.time then return a.time < b.time end
-                return a.damage < b.damage
-            end)
-            -- 保留前 50 条
-            if #history > 50 then
-                local trimmed = {}
-                for i = 1, 50 do trimmed[i] = history[i] end
-                history = trimmed
-            end
-            -- 存回云端
-            clientCloud:Set("leaderboard_history", cjson.encode(history), {
-                ok = function()
-                    print("[TrialState] Leaderboard history saved, count=" .. #history)
-                    leaderboardData_ = history
-                    BuildLeaderboardUI()
-                end,
-                error = function(code, reason)
-                    print("[TrialState] Save leaderboard error: " .. tostring(reason))
-                    leaderboardData_ = history
-                    BuildLeaderboardUI()
-                end,
-            })
-        end,
-        error = function(code, reason)
-            print("[TrialState] Get history error: " .. tostring(reason))
-            -- 无法拉取旧数据，直接存新记录
-            local history = { newEntry }
-            clientCloud:Set("leaderboard_history", cjson.encode(history), {
-                ok = function()
-                    leaderboardData_ = history
-                    BuildLeaderboardUI()
-                end,
-                error = function()
-                    leaderboardData_ = history
-                    BuildLeaderboardUI()
-                end,
-            })
-        end,
-    })
-end
-
---- 拉取排行榜数据
-FetchLeaderboard = function()
-    endScreenPhase_ = "leaderboard"
-    local cjson = require("cjson")
-
-    clientCloud:Get("leaderboard_history", {
-        ok = function(values)
-            local history = {}
-            if values and values.leaderboard_history then
-                local ok2, decoded = pcall(cjson.decode, values.leaderboard_history)
-                if ok2 and type(decoded) == "table" then
-                    history = decoded
-                end
-            end
-            -- 排序
-            table.sort(history, function(a, b)
-                if a.time ~= b.time then return a.time < b.time end
-                return a.damage < b.damage
-            end)
-            print("[TrialState] Leaderboard fetched from history, count=" .. #history)
-            leaderboardData_ = history
-            BuildLeaderboardUI()
-        end,
-        error = function(code, reason)
-            print("[TrialState] Leaderboard fetch error: " .. tostring(reason))
-            leaderboardData_ = {}
-            BuildLeaderboardUI()
-        end,
-    })
-end
-
---- 构建排行榜 UI 内容
-BuildLeaderboardUI = function()
-    local panel = uiRoot_ and uiRoot_:FindById("endLeaderboard")
-    if not panel then return end
-
-    -- 清空并重建
-    local children = {}
-
-    if #leaderboardData_ == 0 then
-        children[#children + 1] = UI.Label {
-            text = "暂无数据",
-            fontSize = 12,
-            fontColor = { 120, 120, 130, 180 },
-        }
-    else
-        -- 显示前 10 条
-        local showCount = math.min(10, #leaderboardData_)
-        for i = 1, showCount do
-            local item = leaderboardData_[i]
-            local name = item.name or "未知"
-            local t = item.time or 0
-            local d = item.damage or 0
-            local isMe = (name == playerInputId_)
-
-            local rowColor = isMe and { 255, 220, 100, 255 } or { 200, 205, 210, 220 }
-            children[#children + 1] = UI.Panel {
-                width = "100%",
-                flexDirection = "row",
-                justifyContent = "space-between",
-                paddingLeft = 4, paddingRight = 4,
-                paddingTop = 3, paddingBottom = 3,
-                backgroundColor = isMe and { 60, 55, 30, 100 } or { 0, 0, 0, 0 },
-                borderRadius = 4,
-                children = {
-                    UI.Label {
-                        text = "#" .. i .. " " .. name,
-                        fontSize = 11,
-                        fontColor = rowColor,
-                    },
-                    UI.Label {
-                        text = t .. "秒 " .. d .. "伤害",
-                        fontSize = 11,
-                        fontColor = { 160, 170, 180, 200 },
-                    },
-                },
-            }
-        end
-    end
-
-    panel:ClearChildren()
-    for _, child in ipairs(children) do
-        panel:AddChild(child)
-    end
-end
-
--- ============================================================================
 -- 输入事件
 -- ============================================================================
 
@@ -1820,9 +1118,9 @@ function TrialState.OnKeyDown(key)
     if KeyBindings.IsKey("jump", key) then
         DoJump()
     elseif KeyBindings.IsKey("attack1", key) then
-        StartAttack(1)
+        Combat.StartAttack(1)
     elseif KeyBindings.IsKey("attack2", key) then
-        StartAttack(2)
+        Combat.StartAttack(2)
     elseif KeyBindings.IsKey("transform", key) then
         DoTransform()
     end
@@ -1830,9 +1128,9 @@ end
 
 function TrialState.OnMouseDown(button)
     if button == MOUSEB_LEFT then
-        StartAttack(1)  -- 左键 = 招式1
+        Combat.StartAttack(1)  -- 左键 = 招式1
     elseif button == MOUSEB_RIGHT then
-        StartAttack(2)  -- 右键 = 招式2
+        Combat.StartAttack(2)  -- 右键 = 招式2
     end
 end
 
@@ -1902,16 +1200,16 @@ function TrialState.Render(vg)
         platforms = platforms_,
         targets = targets_,
         dummy = dummy_,
-        dummyWeapon = dummyWeapon_,
-        dummyAttacking = dummyAttacking_,
-        dummyCurrentAttack = dummyCurrentAttack_,
-        dummyAttackProgress = dummyAttackProgress_,
-        dummyFacingRight = dummyFacingRight_,
-        dummyMoving = dummyMoving_,
-        attacking = attacking_,
-        currentAttack = currentAttack_,
-        attackTimer = attackTimer_,
-        attackDuration = attackDuration_,
+        dummyWeapon = Combat.GetDummyWeapon(),
+        dummyAttacking = Combat.IsDummyAttacking(),
+        dummyCurrentAttack = Combat.GetDummyCurrentAttack(),
+        dummyAttackProgress = Combat.GetDummyAttackProgress(),
+        dummyFacingRight = Combat.IsDummyFacingRight(),
+        dummyMoving = Combat.IsDummyMoving(),
+        attacking = Combat.IsAttacking(),
+        currentAttack = Combat.GetCurrentAttack(),
+        attackTimer = Combat.GetAttackTimer(),
+        attackDuration = Combat.GetAttackDuration(),
         weaponStrokes = weaponStrokes_,
         hitEffects = hitEffects_,
         combo = combo_,
@@ -1925,19 +1223,29 @@ function TrialState.Render(vg)
         playerImage = playerImage_,
         playerRunFrames = playerRunFrames_,
         playerFrameIndex = playerFrameIndex_,
-        weaponClashAnim = weaponClashAnim_,
-        weaponClashX = weaponClashX_,
-        weaponClashY = weaponClashY_,
+        weaponClashAnim = Combat.GetWeaponClashAnim(),
+        weaponClashX = 0, -- filled below
+        weaponClashY = 0,
         -- 弹开状态
-        deflecting = deflecting_,
-        deflectTimer = deflectTimer_,
-        deflectDuration = deflectDuration_,
-        deflectStartX = deflectStartX_,
-        deflectStartY = deflectStartY_,
-        deflectAngle = deflectAngle_,
-        deflectSpin = deflectSpin_,
-        deflectWeaponAngle = deflectWeaponAngle_,
+        deflecting = Combat.IsDeflecting(),
+        deflectTimer = 0,
+        deflectDuration = 0.3,
+        deflectStartX = 0, deflectStartY = 0,
+        deflectAngle = 0, deflectSpin = 0,
+        deflectWeaponAngle = 0,
     }
+    -- 填充多返回值字段（避免重复调用）
+    S.weaponClashX, S.weaponClashY = Combat.GetWeaponClashPos()
+    local dd = Combat.GetDeflectData()
+    if dd then
+        S.deflectTimer = dd.timer or 0
+        S.deflectDuration = dd.duration or 0.3
+        S.deflectStartX = dd.startX or 0
+        S.deflectStartY = dd.startY or 0
+        S.deflectAngle = dd.angle or 0
+        S.deflectSpin = dd.spin or 0
+        S.deflectWeaponAngle = dd.weaponAngle or 0
+    end
     
     nvgBeginFrame(vg, w, h, 1.0)
     nvgScale(vg, dpr, dpr)
@@ -1986,461 +1294,6 @@ function TrialState.Render(vg)
     
     nvgResetTransform(vg)
     nvgEndFrame(vg)
-end
-
-
-
--- ============================================================================
--- 木桩攻击系统
--- ============================================================================
-
---- 更新木桩攻击AI（随机挥剑，使用与玩家相同的攻击模组）
-UpdateDummyAttack = function(dt)
-    if not dummy_ or not dummyWeapon_ then return end
-    if #dummyAttacks_ == 0 then return end
-
-    -- 木桩朝向玩家
-    dummyFacingRight_ = player_.x > dummy_.x
-
-    -- 攻击中：更新进度（攻击时不移动）
-    if dummyAttacking_ then
-        dummyMoving_ = false
-        dummyVx_ = 0
-        dummyAttackTimer_ = dummyAttackTimer_ + dt
-        dummyAttackProgress_ = dummyAttackTimer_ / dummyAttackDuration_
-
-        if dummyAttackProgress_ >= 1.0 then
-            -- 攻击结束
-            dummyAttacking_ = false
-            dummyCurrentAttack_ = nil
-            dummyAttackProgress_ = 0
-            dummyHitPlayer_ = false
-            -- 设置下次攻击冷却
-            dummyAttackCooldown_ = DUMMY_ATTACK_INTERVAL_MIN
-                + math.random() * (DUMMY_ATTACK_INTERVAL_MAX - DUMMY_ATTACK_INTERVAL_MIN)
-        else
-            -- 检测是否命中玩家
-            CheckDummyAttackHitPlayer()
-        end
-        return
-    end
-
-    -- 冷却中：边追击边等待
-    if dummyAttackCooldown_ > 0 then
-        dummyAttackCooldown_ = dummyAttackCooldown_ - dt
-        UpdateDummyMovement(dt)
-        if dummyAttackCooldown_ > 0 then return end
-    end
-
-    -- 冷却结束：立即发起攻击（无需距离判断）
-    UpdateDummyMovement(dt)
-    local idx = math.random(1, #dummyAttacks_)
-    dummyCurrentAttack_ = dummyAttacks_[idx]
-    dummyAttacking_ = true
-    dummyAttackTimer_ = 0
-    dummyAttackProgress_ = 0
-    dummyHitPlayer_ = false
-    dummyAttackDuration_ = dummyCurrentAttack_.duration * 0.7
-end
-
---- 锻造师移动追击玩家
-UpdateDummyMovement = function(dt)
-    if not dummy_ then return end
-    
-    local distToPlayer = math.abs(player_.x - dummy_.x)
-    local atkRange = Config.Combat.DummyAttackRange * physScale_
-    
-    -- 在攻击范围内则停止
-    if distToPlayer <= atkRange then
-        dummyMoving_ = false
-        dummyVx_ = 0
-        return
-    end
-    
-    -- 追击玩家
-    dummyMoving_ = true
-    local speed = Config.Combat.DummyMoveSpeed * physScale_
-    local dir = dummyFacingRight_ and 1 or -1
-    dummyVx_ = dir * speed
-    
-    -- 更新位置
-    dummy_.x = dummy_.x + dummyVx_ * dt
-    
-    -- 边界限制（不超出屏幕）
-    local margin = dummy_.width * 0.5
-    if dummy_.x < margin then dummy_.x = margin end
-    if dummy_.x > screenW_ - margin then dummy_.x = screenW_ - margin end
-end
-
---- 检测木桩攻击是否命中玩家
-CheckDummyAttackHitPlayer = function()
-    if not dummyAttacking_ or not dummyCurrentAttack_ then return end
-    if dummyHitPlayer_ then return end  -- 本次攻击已命中
-    if not dummy_ then return end
-
-    local atk = dummyCurrentAttack_
-    local dir = dummyFacingRight_ and 1 or -1
-    local originX = dummy_.x + dir * 10 * physScale_
-    local originY = dummy_.y - dummy_.height * 0.6
-    local range = atk.range * physScale_
-    local progress = dummyAttackProgress_
-
-    -- 计算木桩武器尖端位置
-    local tipX, tipY
-    if atk.isThrust then
-        -- 突刺
-        local eased = math.sin(progress * math.pi)  -- 0→1→0 前冲后收
-        local thrustLen = range * eased
-        tipX = originX + dir * thrustLen
-        tipY = originY
-    else
-        -- 挥动
-        local easedProgress = 1.0 - (1.0 - progress) * (1.0 - progress)
-        local arcDir = (atk.direction or 1)
-        local startAngle = math.rad(atk.startAngle or -60)
-        local sweepAngle = math.rad(atk.arc) * arcDir * easedProgress
-        local currentAngle
-        if dummyFacingRight_ then
-            currentAngle = startAngle + sweepAngle
-        else
-            currentAngle = math.pi - (startAngle + sweepAngle)
-        end
-        tipX = originX + math.cos(currentAngle) * range
-        tipY = originY + math.sin(currentAngle) * range
-    end
-
-    -- 检测是否命中玩家（简化：点到矩形距离）
-    local px = player_.x
-    local py = player_.y
-    local pw = player_.width
-    local ph = player_.height
-
-    -- 玩家中心
-    local pcx = px + pw / 2
-    local pcy = py - ph / 2
-
-    -- 武器线段中点到玩家中心距离
-    local midX = (originX + tipX) / 2
-    local midY = (originY + tipY) / 2
-    local dx = math.abs(midX - pcx)
-    local dy = math.abs(midY - pcy)
-    local hitRadius = range * 0.5 + pw * 0.3
-
-    if dx < hitRadius and dy < ph * 0.6 then
-        -- 命中！击退玩家
-        dummyHitPlayer_ = true
-        local knockDir = dummyFacingRight_ and 1 or -1
-        local kb = (atk.knockback or 8) * physScale_
-        
-        -- 计算伤害
-        local dmg = atk.damage or 150
-        
-        -- 材质效果：shatter（碎裂）- 受击伤害/击退+20%
-        if materialEffect_ == "shatter" then
-            kb = kb * 1.2
-            dmg = math.floor(dmg * 1.2)
-        end
-        
-        -- 材质效果：lifesteal 护盾减免击退和伤害
-        local shield = player_.healShield or 0
-        if shield > 0 then
-            local reduction = math.min(shield, kb * 0.3)
-            kb = kb - reduction
-            player_.healShield = shield - reduction
-        end
-        
-        -- 扣除玩家血量
-        player_.hp = math.max(0, player_.hp - dmg)
-        player_.hitAnim = 0.5  -- 受击闪烁
-        
-        player_.vx = knockDir * kb * 6
-        player_.vy = -kb * 2.5
-        player_.onGround = false
-
-        -- 伤害数字特效（右侧偏移）
-        hitEffects_[#hitEffects_ + 1] = {
-            x = pcx + 25 * physScale_,
-            y = pcy - 15,
-            text = "-" .. dmg,
-            timer = Config.Combat.DamageNumberDuration,
-            color = { 255, 80, 80 },
-        }
-        -- 招式名称特效（左侧偏移）
-        hitEffects_[#hitEffects_ + 1] = {
-            x = pcx - 25 * physScale_,
-            y = pcy - 15,
-            text = atk.name .. "!",
-            timer = 1.0,
-            color = { 255, 100, 80 },
-        }
-    end
-end
-
--- ============================================================================
--- 武器碰撞系统
--- ============================================================================
-
---- 初始化木桩预制武器（模拟木桩手持一把剑，向右伸出）
-InitDummyWeapon = function()
-    -- 武器参数（相对于木桩的局部定义，实际位置在 UpdateDummyWeapon 中计算）
-    dummyWeapon_ = {
-        -- 碰撞体定义（线段：从根部到尖端）
-        localOffsetX = 0,            -- 相对木桩中心的 X 偏移（渲染时计算）
-        localOffsetY = -0.6,         -- 相对木桩高度的比例偏移（0.6 = 60% 高度处）
-        angle = -0.3,                -- 武器角度（弧度，略微上扬向右）
-        length = 50,                 -- 武器长度（基础值，会乘以 physScale_）
-        width = 8,                   -- 碰撞宽度（基础值）
-        -- 力属性
-        force = 12,                  -- 力的大小（击退力度）
-        forceDir = 1,                -- 力的方向（1=向右，-1=向左）
-        -- 运行时计算的世界坐标
-        rootX = 0, rootY = 0,        -- 根部位置
-        tipX = 0, tipY = 0,          -- 尖端位置
-    }
-    print("[TrialState] Dummy weapon initialized (right side)")
-end
-
---- 更新木桩武器位置（跟随木桩 + 攻击动画）
-UpdateDummyWeapon = function(dt)
-    if not dummyWeapon_ or not dummy_ then return end
-    
-    local dw = dummyWeapon_
-    local dx = dummy_.x
-    local dy = dummy_.y
-    local dh = dummy_.height
-    
-    -- 受击时武器也跟随晃动
-    local shakeX = 0
-    if dummy_.hitAnim > 0 then
-        shakeX = math.sin(dummy_.hitAnim * 20) * 4 * dummy_.hitAnim * dummy_.hitDir
-    end
-    
-    -- 根部位置：木桩手持武器位置
-    local len = dw.length * physScale_
-    local dir = dummyFacingRight_ and 1 or -1
-    dw.forceDir = dir
-    dw.rootX = dx + shakeX + dir * 10 * physScale_
-    dw.rootY = dy + dw.localOffsetY * dh
-    
-    -- 攻击中：武器跟随攻击弧度运动
-    if dummyAttacking_ and dummyCurrentAttack_ then
-        local atk = dummyCurrentAttack_
-        local range = atk.range * physScale_
-        local progress = dummyAttackProgress_
-        
-        if atk.isThrust then
-            -- 突刺动画
-            local eased = math.sin(progress * math.pi)
-            local thrustLen = range * eased
-            dw.tipX = dw.rootX + dir * thrustLen
-            dw.tipY = dw.rootY
-            dw.angle = dummyFacingRight_ and 0 or math.pi
-        else
-            -- 挥动动画（与玩家渲染逻辑一致）
-            local easedProgress = 1.0 - (1.0 - progress) * (1.0 - progress)
-            local arcDir = (atk.direction or 1)
-            local startAngle = math.rad(atk.startAngle or -60)
-            local sweepAngle = math.rad(atk.arc) * arcDir * easedProgress
-            local currentAngle
-            if dummyFacingRight_ then
-                currentAngle = startAngle + sweepAngle
-            else
-                currentAngle = math.pi - (startAngle + sweepAngle)
-            end
-            dw.tipX = dw.rootX + math.cos(currentAngle) * range
-            dw.tipY = dw.rootY + math.sin(currentAngle) * range
-            dw.angle = currentAngle
-        end
-    else
-        -- 静止/待机状态：武器斜持朝前
-        local idleAngle = dummyFacingRight_ and (-0.3) or (math.pi + 0.3)
-        dw.angle = idleAngle
-        dw.tipX = dw.rootX + math.cos(idleAngle) * len
-        dw.tipY = dw.rootY + math.sin(idleAngle) * len
-    end
-end
-
---- 获取玩家武器当前碰撞数据（攻击时有效）
---- @return table|nil 碰撞体 { rootX, rootY, tipX, tipY, width, force, forceDir }
-GetPlayerWeaponCollider = function(progress)
-    if not attacking_ or not currentAttack_ then return nil end
-    
-    local atk = currentAttack_
-    local dir = player_.facingRight and 1 or -1
-    local originX = player_.x + player_.width / 2 + dir * 10 * physScale_
-    local originY = player_.y + player_.height * 0.4
-    local range = atk.range * physScale_
-    
-    local tipX, tipY
-    
-    if atk.isThrust then
-        -- 突刺：线段碰撞体
-        local thrustLen = GetThrustLength(progress)
-        tipX = originX + dir * thrustLen
-        tipY = originY
-    else
-        -- 挥动：刃尖位置
-        local easedProgress = 1.0 - (1.0 - progress) * (1.0 - progress)
-        local arcDir = (atk.direction or 1)
-        local startAngle = math.rad(atk.startAngle or -60)
-        local sweepAngle = math.rad(atk.arc) * arcDir * easedProgress
-        local currentAngle
-        if player_.facingRight then
-            currentAngle = startAngle + sweepAngle
-        else
-            currentAngle = math.pi - (startAngle + sweepAngle)
-        end
-        tipX = originX + math.cos(currentAngle) * range
-        tipY = originY + math.sin(currentAngle) * range
-    end
-    
-    return {
-        rootX = originX,
-        rootY = originY,
-        tipX = tipX,
-        tipY = tipY,
-        width = 12 * physScale_,
-        force = atk.knockback or 8,
-        forceDir = dir,
-    }
-end
-
---- 线段-线段最短距离（用于武器碰撞检测）
-local function SegmentToSegmentDist(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2)
-    -- 简化实现：检测每个线段的端点和中点到对方线段的距离，取最小
-    local function ptSegDist(px, py, sx1, sy1, sx2, sy2)
-        local dx = sx2 - sx1
-        local dy = sy2 - sy1
-        local len2 = dx * dx + dy * dy
-        if len2 < 0.01 then
-            return math.sqrt((px - sx1) * (px - sx1) + (py - sy1) * (py - sy1))
-        end
-        local t = math.max(0, math.min(1, ((px - sx1) * dx + (py - sy1) * dy) / len2))
-        local cx = sx1 + t * dx
-        local cy = sy1 + t * dy
-        return math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy))
-    end
-
-    -- A段的3个采样点到B段的距离
-    local midAx = (ax1 + ax2) / 2
-    local midAy = (ay1 + ay2) / 2
-    local d1 = ptSegDist(ax1, ay1, bx1, by1, bx2, by2)
-    local d2 = ptSegDist(ax2, ay2, bx1, by1, bx2, by2)
-    local d3 = ptSegDist(midAx, midAy, bx1, by1, bx2, by2)
-
-    -- B段的3个采样点到A段的距离
-    local midBx = (bx1 + bx2) / 2
-    local midBy = (by1 + by2) / 2
-    local d4 = ptSegDist(bx1, by1, ax1, ay1, ax2, ay2)
-    local d5 = ptSegDist(bx2, by2, ax1, ay1, ax2, ay2)
-    local d6 = ptSegDist(midBx, midBy, ax1, ay1, ax2, ay2)
-
-    return math.min(d1, d2, d3, d4, d5, d6)
-end
-
---- 检测玩家武器与木桩武器的碰撞
-CheckWeaponClash = function(progress)
-    if not dummyWeapon_ or not dummy_ then return end
-    -- 木桩未攻击时武器隐藏，无法格挡
-    if not dummyAttacking_ then return end
-    if weaponClashCooldown_ > 0 then return end
-    
-    local playerWeapon = GetPlayerWeaponCollider(progress)
-    if not playerWeapon then return end
-    
-    -- 线段-线段最近距离检测
-    local dw = dummyWeapon_
-    local dist = SegmentToSegmentDist(
-        playerWeapon.rootX, playerWeapon.rootY, playerWeapon.tipX, playerWeapon.tipY,
-        dw.rootX, dw.rootY, dw.tipX, dw.tipY
-    )
-    
-    local collisionThreshold = (playerWeapon.width + dw.width * physScale_) / 2
-    
-    if dist < collisionThreshold then
-        -- 碰撞发生！
-        weaponClashCooldown_ = 0.4  -- 冷却，避免连续触发
-        
-        -- 碰撞点（两线段中点的中点）
-        local midPX = (playerWeapon.rootX + playerWeapon.tipX) / 2
-        local midPY = (playerWeapon.rootY + playerWeapon.tipY) / 2
-        local midDX = (dw.rootX + dw.tipX) / 2
-        local midDY = (dw.rootY + dw.tipY) / 2
-        weaponClashX_ = (midPX + midDX) / 2
-        weaponClashY_ = (midPY + midDY) / 2
-        weaponClashAnim_ = 1.0
-        
-        -- 力的反馈：玩家被弹开（木桩武器的 force 反作用于玩家）
-        local pushDir = player_.facingRight and -1 or 1
-        player_.vx = pushDir * dw.force * physScale_ * 8
-        player_.vy = -dw.force * physScale_ * 3
-        player_.onGround = false
-        
-        -- 同时木桩受到力的反馈（被推的方向）
-        dummy_.hitAnim = 0.6
-        dummy_.hitDir = playerWeapon.forceDir
-        
-        -- 特效文字
-        hitEffects_[#hitEffects_ + 1] = {
-            x = weaponClashX_,
-            y = weaponClashY_ - 20,
-            text = "格挡!",
-            timer = 1.0,
-            color = { 255, 200, 80 },
-        }
-        
-        -- 材质效果：thorns（反震）- 格挡时对木桩造成反伤
-        local mat = gameData_ and gameData_.material or nil
-        if mat and mat.effect == "thorns" then
-            local thornsDmg = 100
-            dummy_.hp = math.max(0, dummy_.hp - thornsDmg)
-            hitEffects_[#hitEffects_ + 1] = {
-                x = dummy_.x,
-                y = dummy_.y - (dummy_.height or 60) * 0.7,
-                text = "反伤-" .. thornsDmg,
-                timer = 1.2,
-                color = { 255, 160, 50 },
-            }
-            print("[WeaponClash] Thorns triggered! Dummy takes " .. thornsDmg .. " damage")
-        end
-        
-        -- 进入弹开状态（武器不直接消失，被弹向对方挥动方向）
-        deflecting_ = true
-        deflectTimer_ = 0
-        -- 弹开起点 = 碰撞点
-        deflectStartX_ = weaponClashX_
-        deflectStartY_ = weaponClashY_
-        -- 弹开方向 = 木桩武器挥动方向（对方挥动方向）
-        deflectAngle_ = dw.angle
-        -- 武器当前角度（用于渲染旋转中的武器）
-        local dir = player_.facingRight and 1 or -1
-        deflectWeaponAngle_ = dir * math.pi / 4  -- 近似挥砍角度
-        -- 旋转速度：快速旋转表示被弹飞
-        deflectSpin_ = dir * (-12)  -- 反方向旋转
-        -- 中断攻击逻辑（但保留渲染数据用于弹开动画）
-        attacking_ = false
-        currentAttack_ = nil
-        
-        print("[WeaponClash] Weapons collided! Weapon deflected with force: " .. dw.force)
-    end
-end
-
---- 更新武器碰撞系统（动画衰减、冷却、弹开动画）
-UpdateWeaponClash = function(dt)
-    if weaponClashAnim_ > 0 then
-        weaponClashAnim_ = weaponClashAnim_ - dt * 3
-    end
-    if weaponClashCooldown_ > 0 then
-        weaponClashCooldown_ = weaponClashCooldown_ - dt
-    end
-    -- 弹开动画更新
-    if deflecting_ then
-        deflectTimer_ = deflectTimer_ + dt
-        if deflectTimer_ >= deflectDuration_ then
-            deflecting_ = false
-            deflectTimer_ = 0
-        end
-    end
 end
 
 return TrialState

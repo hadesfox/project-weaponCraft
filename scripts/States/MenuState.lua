@@ -1,6 +1,7 @@
 -- ============================================================================
 -- States/MenuState.lua - 主菜单（NanoVG 背景 + 交互按钮特效）
 -- 背景图上三个按钮区域：开始游戏、查看角色、离开
+-- 设置面板和排行榜面板已抽取至 Menu/Panels.lua
 -- 悬停放大发光，点击反馈
 -- ============================================================================
 
@@ -9,22 +10,17 @@ local Config = require("Config")
 local NVG = require("NVG")
 local KeyBindings = require("KeyBindings")
 local GameSettings = require("GameSettings")
+local Panels = require("Menu.Panels")
 
 local MenuState = {}
 
 -- 前置声明（内部子函数）
 local HitTestButtons
 local HitTestSecret
-local HitTestSettings
-local HitTestLeaderboard
 local ToggleBackground
 local RenderBackground
 local RenderButtons
 local RenderCharacterPanel
-local RenderSettingsPanel
-local RenderLeaderboardPanel
-local FetchMenuLeaderboard
-local BuildMenuLeaderboardRows
 local SplitLines
 
 -- 回调
@@ -65,25 +61,6 @@ local charPanelAnim_ = 0    -- 面板展开动画 (0→1)
 
 -- 已点击开始游戏（隐藏所有菜单内容，只渲染纯黑）
 local gameStarted_ = false
-
--- 排行榜面板状态
-local showLeaderboard_ = false
-local leaderboardAnim_ = 0      -- 面板展开动画 (0→1)
-local menuLeaderboardData_ = {} -- 排行榜数据
-local menuLeaderboardLoading_ = false
-
--- 设置面板状态
-local showSettings_ = false
-local settingsAnim_ = 0     -- 面板展开动画 (0→1)
-local settingsScroll_ = 0   -- 滚动偏移
-local rebindingAction_ = nil -- 当前正在重绑定的操作ID
-local rebindFlash_ = 0      -- 重绑定闪烁动画
-
--- 设置触发点（铁砧上的盾牌图标）
-local SETTINGS_ZONE = { rx = 0.545, ry = 0.67, rw = 0.05, rh = 0.08 }
-
--- 排行榜触发点（左上角旗帜/盾牌区域）
-local LEADERBOARD_ZONE = { rx = 0.05, ry = 0.02, rw = 0.14, rh = 0.35 }
 
 -- 角色数据
 local characters_ = {
@@ -132,15 +109,7 @@ function MenuState.Enter(onStart)
     showCharPanel_ = false
     charPanelAnim_ = 0
     gameStarted_ = false
-    showSettings_ = false
-    settingsAnim_ = 0
-    settingsScroll_ = 0
-    rebindingAction_ = nil
-    rebindFlash_ = 0
-    showLeaderboard_ = false
-    leaderboardAnim_ = 0
-    menuLeaderboardData_ = {}
-    menuLeaderboardLoading_ = false
+    Panels.Reset()
 end
 
 --- 离开菜单状态
@@ -167,12 +136,7 @@ function MenuState.Leave()
     -- 重置 UI/面板状态
     showCharPanel_ = false
     charPanelAnim_ = 0
-    showLeaderboard_ = false
-    leaderboardAnim_ = 0
-    menuLeaderboardData_ = {}
-    showSettings_ = false
-    settingsAnim_ = 0
-    rebindingAction_ = nil
+    Panels.Reset()
     gameStarted_ = false
     uiRoot_ = nil
     onStartGame_ = nil
@@ -211,18 +175,8 @@ function MenuState.Update(dt)
     local targetPanel = showCharPanel_ and 1.0 or 0.0
     charPanelAnim_ = charPanelAnim_ + (targetPanel - charPanelAnim_) * dt * 8
 
-    -- 设置面板动画
-    local targetSettings = showSettings_ and 1.0 or 0.0
-    settingsAnim_ = settingsAnim_ + (targetSettings - settingsAnim_) * dt * 8
-
-    -- 排行榜面板动画
-    local targetLb = showLeaderboard_ and 1.0 or 0.0
-    leaderboardAnim_ = leaderboardAnim_ + (targetLb - leaderboardAnim_) * dt * 8
-
-    -- 重绑定闪烁
-    if rebindingAction_ then
-        rebindFlash_ = rebindFlash_ + dt * 6
-    end
+    -- 设置/排行榜面板动画
+    Panels.Update(dt)
 end
 
 -- ============================================================================
@@ -230,33 +184,8 @@ end
 -- ============================================================================
 
 function MenuState.OnKeyDown(key)
-    -- 设置面板：按键重绑定模式
-    if showSettings_ then
-        if rebindingAction_ then
-            -- 正在等待按键输入
-            if key == KEY_ESCAPE then
-                -- 取消重绑定
-                rebindingAction_ = nil
-            else
-                -- 绑定新按键
-                KeyBindings.SetKeys(rebindingAction_, { key })
-                KeyBindings.Save()
-                rebindingAction_ = nil
-            end
-            return
-        end
-        if key == KEY_ESCAPE then
-            showSettings_ = false
-        end
-        return
-    end
-
-    if showLeaderboard_ then
-        if key == KEY_ESCAPE then
-            showLeaderboard_ = false
-        end
-        return
-    end
+    -- 设置/排行榜面板优先处理
+    if Panels.HandleKeyDown(key) then return end
 
     if key == KEY_ESCAPE then
         if showCharPanel_ then
@@ -278,14 +207,14 @@ function MenuState.OnMouseDown(button)
     local my = input.mousePosition.y / graphics:GetDPR()
 
     -- 设置面板打开时
-    if showSettings_ then
-        MenuState.HandleSettingsClick(mx, my)
+    if Panels.IsSettingsOpen() then
+        Panels.HandleSettingsClick(mx, my, screenW_, screenH_)
         return
     end
 
     -- 排行榜面板打开时，点击关闭
-    if showLeaderboard_ then
-        showLeaderboard_ = false
+    if Panels.IsLeaderboardOpen() then
+        Panels.CloseLeaderboard()
         return
     end
 
@@ -302,17 +231,14 @@ function MenuState.OnMouseDown(button)
     end
 
     -- 排行榜触发点
-    if HitTestLeaderboard(mx, my) then
-        showLeaderboard_ = true
-        FetchMenuLeaderboard()
+    if Panels.HitTestLeaderboard(mx, my, screenW_, screenH_) then
+        Panels.OpenLeaderboard()
         return
     end
 
     -- 设置触发点
-    if HitTestSettings(mx, my) then
-        showSettings_ = true
-        settingsScroll_ = 0
-        rebindingAction_ = nil
+    if Panels.HitTestSettings(mx, my, screenW_, screenH_) then
+        Panels.OpenSettings()
         return
     end
 
@@ -326,7 +252,7 @@ end
 
 function MenuState.OnMouseUp(button)
     if button ~= MOUSEB_LEFT then return end
-    if showSettings_ then return end
+    if Panels.IsSettingsOpen() then return end
     if pressIndex_ > 0 then
         local mx = input.mousePosition.x / graphics:GetDPR()
         local my = input.mousePosition.y / graphics:GetDPR()
@@ -348,7 +274,7 @@ function MenuState.OnMouseUp(button)
 end
 
 function MenuState.OnMouseMove()
-    if showCharPanel_ or showSettings_ or showLeaderboard_ then
+    if showCharPanel_ or Panels.IsSettingsOpen() or Panels.IsLeaderboardOpen() then
         hoverIndex_ = 0
         return
     end
@@ -361,14 +287,14 @@ function MenuState.OnTouchBegin(x, y)
     local dpr = graphics:GetDPR()
     local tx, ty = x / dpr, y / dpr
 
-    if showSettings_ then
-        MenuState.HandleSettingsClick(tx, ty)
+    if Panels.IsSettingsOpen() then
+        Panels.HandleSettingsClick(tx, ty, screenW_, screenH_)
         return
     end
 
     -- 排行榜面板打开时，点击关闭
-    if showLeaderboard_ then
-        showLeaderboard_ = false
+    if Panels.IsLeaderboardOpen() then
+        Panels.CloseLeaderboard()
         return
     end
 
@@ -384,17 +310,14 @@ function MenuState.OnTouchBegin(x, y)
     end
 
     -- 排行榜触发点
-    if HitTestLeaderboard(tx, ty) then
-        showLeaderboard_ = true
-        FetchMenuLeaderboard()
+    if Panels.HitTestLeaderboard(tx, ty, screenW_, screenH_) then
+        Panels.OpenLeaderboard()
         return
     end
 
     -- 设置触发点
-    if HitTestSettings(tx, ty) then
-        showSettings_ = true
-        settingsScroll_ = 0
-        rebindingAction_ = nil
+    if Panels.HitTestSettings(tx, ty, screenW_, screenH_) then
+        Panels.OpenSettings()
         return
     end
 
@@ -481,13 +404,13 @@ function MenuState.Render(vg)
     end
 
     -- 设置面板
-    if settingsAnim_ > 0.01 then
-        RenderSettingsPanel(vg)
+    if Panels.GetSettingsAnim() > 0.01 then
+        Panels.RenderSettings(vg, screenW_, screenH_)
     end
 
     -- 排行榜面板
-    if leaderboardAnim_ > 0.01 then
-        RenderLeaderboardPanel(vg)
+    if Panels.GetLeaderboardAnim() > 0.01 then
+        Panels.RenderLeaderboard(vg, screenW_, screenH_)
     end
 
     -- 右下角版本号
@@ -676,525 +599,6 @@ function SplitLines(str)
         lines[#lines + 1] = line
     end
     return lines
-end
-
--- ============================================================================
--- 设置面板
--- ============================================================================
-
---- 命中测试：设置触发点（铁砧盾牌图标）
-HitTestSettings = function(mx, my)
-    local sx = screenW_ * SETTINGS_ZONE.rx
-    local sy = screenH_ * SETTINGS_ZONE.ry
-    local sw = screenW_ * SETTINGS_ZONE.rw
-    local sh = screenH_ * SETTINGS_ZONE.rh
-    return mx >= sx and mx <= sx + sw and my >= sy and my <= sy + sh
-end
-
---- 设置面板内的点击处理
-function MenuState.HandleSettingsClick(mx, my)
-    -- 如果正在重绑定，取消当前重绑定但继续处理本次点击（可能点了新行）
-    if rebindingAction_ then
-        rebindingAction_ = nil
-    end
-
-    -- 全屏面板区域
-    local margin = 12
-    local panelW = screenW_ - margin * 2
-    local panelH = screenH_ - margin * 2
-    local px = margin
-    local py = margin
-
-    -- "恢复默认"按钮区域（面板底部）
-    local resetBtnW = 120
-    local resetBtnH = 32
-    local resetBtnX = px + panelW / 2 - resetBtnW / 2
-    local resetBtnY = py + panelH - 50
-    if mx >= resetBtnX and mx <= resetBtnX + resetBtnW and
-       my >= resetBtnY and my <= resetBtnY + resetBtnH then
-        KeyBindings.ResetToDefault()
-        GameSettings.ResetDurations()
-        return
-    end
-
-    -- ====== 环节时长按钮点击检测 ======
-    local contentTop = py + 52
-    local curY = contentTop + 6 - settingsScroll_
-    curY = curY + 26  -- 跳过【环节时长】标题
-
-    local btnW = 46
-    local btnH = 28
-    local btnGap = 8
-
-    local durationClickRows = {
-        { options = Config.MaterialTimeOptions, setter = GameSettings.SetMaterialTime },
-        { options = Config.HammerTimeOptions, setter = GameSettings.SetHammerTime },
-        { options = Config.QuenchTimeOptions, setter = GameSettings.SetQuenchTime },
-        { options = Config.GrindTimeOptions, setter = GameSettings.SetGrindTime },
-        { options = Config.TrialTimeOptions, setter = GameSettings.SetTrialTime },
-    }
-
-    for _, row in ipairs(durationClickRows) do
-        local opts = row.options
-        local totalW = #opts * btnW + (#opts - 1) * btnGap
-        local startX = px + panelW - 24 - totalW
-        local btnRowY = curY + 4
-
-        for oi = 1, #opts do
-            local bx = startX + (oi - 1) * (btnW + btnGap)
-            if mx >= bx and mx <= bx + btnW and
-               my >= btnRowY and my <= btnRowY + btnH then
-                row.setter(opts[oi])
-                return
-            end
-        end
-
-        curY = curY + 42
-    end
-
-    curY = curY + 12  -- 分隔线间距
-
-    -- ====== 按键绑定行点击 → 进入重绑定 ======
-    -- 使用与 RenderSettingsPanel 完全一致的累加逻辑
-    local actions = KeyBindings.Actions
-    local rowH = 36
-    local lastCategory = ""
-
-    for i = 1, #actions do
-        local action = actions[i]
-
-        -- 分类标题（与渲染逻辑一致）
-        if action.category ~= lastCategory then
-            lastCategory = action.category
-            if i > 1 then curY = curY + 12 end
-            curY = curY + 26
-        end
-
-        local rowY = curY
-
-        -- 按键区域在行右侧
-        local keyBoxX = px + panelW * 0.50
-        local keyBoxW = panelW * 0.42
-        if mx >= keyBoxX and mx <= keyBoxX + keyBoxW and
-           my >= rowY and my <= rowY + rowH then
-            rebindingAction_ = action.id
-            rebindFlash_ = 0
-            return
-        end
-
-        curY = curY + rowH
-    end
-end
-
---- 渲染设置面板
-RenderSettingsPanel = function(vg)
-    local alpha = math.floor(settingsAnim_ * 255)
-    local panelScale = 0.9 + settingsAnim_ * 0.1
-
-    -- 全屏遮罩
-    nvgBeginPath(vg)
-    nvgRect(vg, 0, 0, screenW_, screenH_)
-    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(settingsAnim_ * 220)))
-    nvgFill(vg)
-
-    -- 全屏面板尺寸
-    local margin = 12
-    local panelW = screenW_ - margin * 2
-    local panelH = screenH_ - margin * 2
-    local px = margin
-    local py = margin
-
-    nvgSave(vg)
-    nvgTranslate(vg, screenW_ / 2, screenH_ / 2)
-    nvgScale(vg, panelScale, panelScale)
-    nvgTranslate(vg, -screenW_ / 2, -screenH_ / 2)
-
-    -- 面板背景
-    nvgBeginPath(vg)
-    nvgRoundedRect(vg, px, py, panelW, panelH, 10)
-    nvgFillColor(vg, nvgRGBA(20, 22, 30, alpha))
-    nvgFill(vg)
-    nvgStrokeColor(vg, nvgRGBA(160, 140, 90, math.floor(alpha * 0.6)))
-    nvgStrokeWidth(vg, 1.5)
-    nvgStroke(vg)
-
-    local fontId = NVG.GetFont()
-    if fontId == -1 then
-        nvgRestore(vg)
-        return
-    end
-    nvgFontFaceId(vg, fontId)
-
-    -- 标题
-    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
-    nvgFontSize(vg, 22)
-    nvgFillColor(vg, nvgRGBA(160, 140, 90, alpha))
-    nvgText(vg, screenW_ / 2, py + 16, "系统设置", nil)
-
-    -- 分割线
-    nvgBeginPath(vg)
-    nvgMoveTo(vg, px + 20, py + 46)
-    nvgLineTo(vg, px + panelW - 20, py + 46)
-    nvgStrokeColor(vg, nvgRGBA(80, 80, 90, math.floor(alpha * 0.5)))
-    nvgStrokeWidth(vg, 1)
-    nvgStroke(vg)
-
-    -- 裁剪区域（内容区）
-    local contentTop = py + 52
-    local contentBottom = py + panelH - 60
-    nvgScissor(vg, px, contentTop, panelW, contentBottom - contentTop)
-
-    local curY = contentTop + 6 - settingsScroll_
-
-    -- ====== 环节时长设置 ======
-    nvgFontSize(vg, 15)
-    nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
-    nvgFillColor(vg, nvgRGBA(100, 180, 255, math.floor(alpha * 0.8)))
-    nvgText(vg, px + 24, curY, "【环节时长】", nil)
-    curY = curY + 26
-
-    -- 通用按钮行渲染辅助
-    local btnW = 46
-    local btnH = 28
-    local btnGap = 8
-
-    local durationRows = {
-        { label = "选材时长", options = Config.MaterialTimeOptions, current = GameSettings.GetMaterialTime() },
-        { label = "锤击时长", options = Config.HammerTimeOptions, current = GameSettings.GetHammerTime() },
-        { label = "淬火时长", options = Config.QuenchTimeOptions, current = GameSettings.GetQuenchTime() },
-        { label = "砥砺时长", options = Config.GrindTimeOptions, current = GameSettings.GetGrindTime() },
-        { label = "试炼时长", options = Config.TrialTimeOptions, current = GameSettings.GetTrialTime() },
-    }
-
-    for _, row in ipairs(durationRows) do
-        nvgFontSize(vg, 16)
-        nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
-        nvgFillColor(vg, nvgRGBA(200, 205, 210, alpha))
-        nvgText(vg, px + 30, curY + 18, row.label, nil)
-
-        local opts = row.options
-        local totalW = #opts * btnW + (#opts - 1) * btnGap
-        local startX = px + panelW - 24 - totalW
-
-        for oi = 1, #opts do
-            local optVal = opts[oi]
-            local bx = startX + (oi - 1) * (btnW + btnGap)
-            local by = curY + 4
-            local isSelected = (optVal == row.current)
-
-            nvgBeginPath(vg)
-            nvgRoundedRect(vg, bx, by, btnW, btnH, 5)
-            if isSelected then
-                nvgFillColor(vg, nvgRGBA(60, 100, 60, alpha))
-                nvgFill(vg)
-                nvgStrokeColor(vg, nvgRGBA(80, 200, 120, alpha))
-            else
-                nvgFillColor(vg, nvgRGBA(40, 42, 52, alpha))
-                nvgFill(vg)
-                nvgStrokeColor(vg, nvgRGBA(80, 80, 95, math.floor(alpha * 0.6)))
-            end
-            nvgStrokeWidth(vg, 1)
-            nvgStroke(vg)
-
-            nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-            nvgFontSize(vg, 13)
-            if isSelected then
-                nvgFillColor(vg, nvgRGBA(80, 220, 130, alpha))
-            else
-                nvgFillColor(vg, nvgRGBA(180, 185, 195, alpha))
-            end
-            nvgText(vg, bx + btnW / 2, by + btnH / 2, tostring(optVal) .. "s", nil)
-        end
-
-        curY = curY + 42
-    end
-
-    -- 分隔线（试炼设置与按键设置之间）
-    nvgBeginPath(vg)
-    nvgMoveTo(vg, px + 24, curY)
-    nvgLineTo(vg, px + panelW - 24, curY)
-    nvgStrokeColor(vg, nvgRGBA(60, 60, 70, math.floor(alpha * 0.4)))
-    nvgStrokeWidth(vg, 1)
-    nvgStroke(vg)
-    curY = curY + 12
-
-    -- ====== 按键设置 ======
-    -- 绘制操作列表
-    local actions = KeyBindings.Actions
-    local rowH = 36
-    local lastCategory = ""
-
-    for i = 1, #actions do
-        local action = actions[i]
-
-        -- 分类标题
-        if action.category ~= lastCategory then
-            lastCategory = action.category
-            -- 分类间隔
-            if i > 1 then curY = curY + 12 end
-            nvgFontSize(vg, 15)
-            nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
-            nvgFillColor(vg, nvgRGBA(100, 180, 255, math.floor(alpha * 0.8)))
-            nvgText(vg, px + 24, curY, "【" .. action.category .. "】", nil)
-            curY = curY + 26
-        end
-
-        local rowY = curY
-
-        -- 操作名
-        nvgFontSize(vg, 16)
-        nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
-        nvgFillColor(vg, nvgRGBA(200, 205, 210, alpha))
-        nvgText(vg, px + 30, rowY + rowH / 2, action.name, nil)
-
-        -- 按键框
-        local keyBoxX = px + panelW * 0.50
-        local keyBoxW = panelW * 0.42
-        local keyBoxH = rowH - 6
-        local keyBoxY = rowY + 3
-
-        local isRebinding = (rebindingAction_ == action.id)
-
-        -- 按键框背景
-        nvgBeginPath(vg)
-        nvgRoundedRect(vg, keyBoxX, keyBoxY, keyBoxW, keyBoxH, 5)
-        if isRebinding then
-            local flash = math.abs(math.sin(rebindFlash_))
-            nvgFillColor(vg, nvgRGBA(60, 50, 20, alpha))
-            nvgFill(vg)
-            nvgStrokeColor(vg, nvgRGBA(255, 200, 60, math.floor(alpha * (0.5 + flash * 0.5))))
-            nvgStrokeWidth(vg, 1.5)
-            nvgStroke(vg)
-        else
-            nvgFillColor(vg, nvgRGBA(40, 42, 52, alpha))
-            nvgFill(vg)
-            nvgStrokeColor(vg, nvgRGBA(80, 80, 95, math.floor(alpha * 0.6)))
-            nvgStrokeWidth(vg, 1)
-            nvgStroke(vg)
-        end
-
-        -- 按键文字
-        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-        if isRebinding then
-            nvgFontSize(vg, 14)
-            nvgFillColor(vg, nvgRGBA(255, 200, 60, alpha))
-            nvgText(vg, keyBoxX + keyBoxW / 2, keyBoxY + keyBoxH / 2, "请按下新按键...", nil)
-        else
-            nvgFontSize(vg, 15)
-            nvgFillColor(vg, nvgRGBA(180, 185, 195, alpha))
-            local displayText = KeyBindings.GetDisplayText(action.id)
-            nvgText(vg, keyBoxX + keyBoxW / 2, keyBoxY + keyBoxH / 2, displayText, nil)
-        end
-
-        curY = curY + rowH
-    end
-
-    nvgResetScissor(vg)
-
-    -- "恢复默认"按钮
-    local resetBtnW = 120
-    local resetBtnH = 32
-    local resetBtnX = px + panelW / 2 - resetBtnW / 2
-    local resetBtnY = py + panelH - 50
-
-    nvgBeginPath(vg)
-    nvgRoundedRect(vg, resetBtnX, resetBtnY, resetBtnW, resetBtnH, 6)
-    nvgFillColor(vg, nvgRGBA(60, 40, 40, alpha))
-    nvgFill(vg)
-    nvgStrokeColor(vg, nvgRGBA(200, 80, 80, math.floor(alpha * 0.7)))
-    nvgStrokeWidth(vg, 1)
-    nvgStroke(vg)
-
-    nvgFontSize(vg, 14)
-    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-    nvgFillColor(vg, nvgRGBA(220, 100, 100, alpha))
-    nvgText(vg, resetBtnX + resetBtnW / 2, resetBtnY + resetBtnH / 2, "恢复默认", nil)
-
-    -- 底部提示
-    nvgFontSize(vg, 12)
-    nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.7)))
-    nvgText(vg, screenW_ / 2, py + panelH - 12, "点击选项修改 · ESC 关闭", nil)
-
-    nvgRestore(vg)
-end
-
--- ============================================================================
--- 排行榜面板
--- ============================================================================
-
---- 命中测试：排行榜触发点（左上角旗帜区域）
-HitTestLeaderboard = function(mx, my)
-    local sx = screenW_ * LEADERBOARD_ZONE.rx
-    local sy = screenH_ * LEADERBOARD_ZONE.ry
-    local sw = screenW_ * LEADERBOARD_ZONE.rw
-    local sh = screenH_ * LEADERBOARD_ZONE.rh
-    return mx >= sx and mx <= sx + sw and my >= sy and my <= sy + sh
-end
-
---- 拉取排行榜数据
-FetchMenuLeaderboard = function()
-    if menuLeaderboardLoading_ then return end
-    menuLeaderboardLoading_ = true
-    menuLeaderboardData_ = {}
-    local cjson = require("cjson")
-
-    clientCloud:Get("leaderboard_history", {
-        ok = function(values)
-            local history = {}
-            if values and values.leaderboard_history then
-                local ok2, decoded = pcall(cjson.decode, values.leaderboard_history)
-                if ok2 and type(decoded) == "table" then
-                    history = decoded
-                end
-            end
-            table.sort(history, function(a, b)
-                if a.time ~= b.time then return a.time < b.time end
-                return a.damage < b.damage
-            end)
-            print("[MenuState] Leaderboard fetched from history, count=" .. #history)
-            menuLeaderboardData_ = history
-            menuLeaderboardLoading_ = false
-        end,
-        error = function(code, reason)
-            print("[MenuState] Leaderboard error: " .. tostring(reason))
-            menuLeaderboardData_ = {}
-            menuLeaderboardLoading_ = false
-        end,
-    })
-end
-
---- 渲染排行榜面板
-RenderLeaderboardPanel = function(vg)
-    local alpha = math.floor(leaderboardAnim_ * 255)
-    local panelScale = 0.85 + leaderboardAnim_ * 0.15
-
-    -- 半透明遮罩
-    nvgBeginPath(vg)
-    nvgRect(vg, 0, 0, screenW_, screenH_)
-    nvgFillColor(vg, nvgRGBA(0, 0, 0, math.floor(leaderboardAnim_ * 180)))
-    nvgFill(vg)
-
-    -- 面板尺寸
-    local panelW = math.min(screenW_ * 0.75, 400)
-    local panelH = math.min(screenH_ * 0.8, 420)
-    local px = (screenW_ - panelW) / 2
-    local py = (screenH_ - panelH) / 2
-
-    nvgSave(vg)
-    nvgTranslate(vg, screenW_ / 2, screenH_ / 2)
-    nvgScale(vg, panelScale, panelScale)
-    nvgTranslate(vg, -screenW_ / 2, -screenH_ / 2)
-
-    -- 面板背景
-    nvgBeginPath(vg)
-    nvgRoundedRect(vg, px, py, panelW, panelH, 14)
-    nvgFillColor(vg, nvgRGBA(20, 22, 28, alpha))
-    nvgFill(vg)
-    nvgStrokeColor(vg, nvgRGBA(160, 140, 90, math.floor(alpha * 0.6)))
-    nvgStrokeWidth(vg, 1.5)
-    nvgStroke(vg)
-
-    local fontId = NVG.GetFont()
-    if fontId == -1 then
-        nvgRestore(vg)
-        return
-    end
-    nvgFontFaceId(vg, fontId)
-
-    -- 标题
-    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
-    nvgFontSize(vg, 20)
-    nvgFillColor(vg, nvgRGBA(160, 140, 90, alpha))
-    nvgText(vg, screenW_ / 2, py + 16, "排行榜", nil)
-
-    -- 分割线
-    nvgBeginPath(vg)
-    nvgMoveTo(vg, px + 20, py + 44)
-    nvgLineTo(vg, px + panelW - 20, py + 44)
-    nvgStrokeColor(vg, nvgRGBA(80, 80, 90, math.floor(alpha * 0.5)))
-    nvgStrokeWidth(vg, 1)
-    nvgStroke(vg)
-
-    -- 列标题
-    local contentX = px + 20
-    local contentW = panelW - 40
-    local headerY = py + 52
-
-    nvgFontSize(vg, 12)
-    nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
-    nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.8)))
-    nvgText(vg, contentX, headerY, "排名", nil)
-    nvgText(vg, contentX + 40, headerY, "玩家", nil)
-    nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
-    nvgText(vg, contentX + contentW, headerY, "用时 / 伤害", nil)
-
-    -- 内容区
-    local rowY = headerY + 22
-    local rowH = 28
-
-    if menuLeaderboardLoading_ then
-        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
-        nvgFontSize(vg, 14)
-        nvgFillColor(vg, nvgRGBA(150, 160, 170, alpha))
-        nvgText(vg, screenW_ / 2, rowY + 20, "加载中...", nil)
-    elseif #menuLeaderboardData_ == 0 then
-        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
-        nvgFontSize(vg, 14)
-        nvgFillColor(vg, nvgRGBA(150, 160, 170, alpha))
-        nvgText(vg, screenW_ / 2, rowY + 20, "暂无数据", nil)
-    else
-        for i, item in ipairs(menuLeaderboardData_) do
-            local y = rowY + (i - 1) * rowH
-            if y + rowH > py + panelH - 40 then break end
-
-            local t = item.time or 0
-            local d = item.damage or 0
-            local name = item.name or "未知"
-
-            -- 排名颜色
-            local rankColor
-            if i == 1 then
-                rankColor = { 255, 215, 0, alpha }     -- 金
-            elseif i == 2 then
-                rankColor = { 200, 200, 210, alpha }   -- 银
-            elseif i == 3 then
-                rankColor = { 205, 127, 50, alpha }    -- 铜
-            else
-                rankColor = { 180, 185, 195, alpha }
-            end
-
-            -- 行背景（交替）
-            if i % 2 == 0 then
-                nvgBeginPath(vg)
-                nvgRoundedRect(vg, contentX - 4, y - 2, contentW + 8, rowH, 4)
-                nvgFillColor(vg, nvgRGBA(40, 42, 50, math.floor(alpha * 0.4)))
-                nvgFill(vg)
-            end
-
-            -- 排名
-            nvgFontSize(vg, 14)
-            nvgTextAlign(vg, NVG_ALIGN_LEFT + NVG_ALIGN_TOP)
-            nvgFillColor(vg, nvgRGBA(rankColor[1], rankColor[2], rankColor[3], rankColor[4]))
-            nvgText(vg, contentX, y + 4, "#" .. i, nil)
-
-            -- 玩家名
-            nvgFillColor(vg, nvgRGBA(200, 205, 210, alpha))
-            nvgText(vg, contentX + 40, y + 4, name, nil)
-
-            -- 用时和伤害
-            nvgTextAlign(vg, NVG_ALIGN_RIGHT + NVG_ALIGN_TOP)
-            nvgFillColor(vg, nvgRGBA(160, 170, 180, math.floor(alpha * 0.9)))
-            nvgText(vg, contentX + contentW, y + 4, t .. "秒 " .. d .. "伤害", nil)
-        end
-    end
-
-    -- 底部提示
-    nvgFontSize(vg, 11)
-    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
-    nvgFillColor(vg, nvgRGBA(120, 130, 140, math.floor(alpha * 0.7)))
-    nvgText(vg, screenW_ / 2, py + panelH - 10, "点击任意位置关闭", nil)
-
-    nvgRestore(vg)
 end
 
 return MenuState
