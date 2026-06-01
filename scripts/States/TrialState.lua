@@ -13,6 +13,7 @@ local KeyBindings = require("KeyBindings")
 local GameSettings = require("GameSettings")
 local Slime = require("Trial.Slime")
 local Renderer = require("Trial.Renderer")
+local VirtualPad = require("Trial.VirtualPad")
 
 local TrialState = {}
 
@@ -39,6 +40,8 @@ local inputLeft_ = false
 local inputRight_ = false
 local inputDown_ = false
 local dropThrough_ = 0  -- 下落穿透计时器（秒），>0 时忽略平台碰撞
+
+-- 虚拟操控（手机端）由 Trial.VirtualPad 模块提供
 
 -- ============================================================================
 -- 攻击系统
@@ -212,6 +215,20 @@ local BuildLeaderboardUI
 function TrialState.Enter(gameData, onComplete)
     gameData_ = gameData
     onComplete_ = onComplete
+    
+    -- 虚拟操控初始化
+    VirtualPad.Init()
+    VirtualPad.SetCallbacks({
+        onJump = function() DoJump() end,
+        onAttack1 = function() StartAttack(1) end,
+        onAttack2 = function() StartAttack(2) end,
+        onDown = function()
+            inputDown_ = true
+            if player_.onGround then dropThrough_ = 0.2 end
+        end,
+        onDownRelease = function() inputDown_ = false end,
+        onDefaultAttack = function() StartAttack(1) end,
+    })
     
     screenW_ = graphics:GetWidth() / graphics:GetDPR()
     screenH_ = graphics:GetHeight() / graphics:GetDPR()
@@ -904,6 +921,13 @@ end
 
 --- 读取输入状态
 UpdateInput = function()
+    if VirtualPad.IsActive() then
+        local deadZone = 0.2
+        inputLeft_ = VirtualPad.GetDirX() < -deadZone
+        inputRight_ = VirtualPad.GetDirX() > deadZone
+        -- inputDown_ 由 VirtualPad 回调驱动
+        return
+    end
     inputLeft_ = KeyBindings.IsDown("move_left")
     inputRight_ = KeyBindings.IsDown("move_right")
     inputDown_ = KeyBindings.IsDown("move_down")
@@ -1437,6 +1461,10 @@ PlayEndVideo = function()
         onEnded = function(self)
             onVideoFinished()
         end,
+        onLoadError = function(self, errorCode, errorName)
+            print("[Trial] End video load failed: " .. tostring(errorName) .. ", skipping to end screen")
+            onVideoFinished()
+        end,
         children = {
             -- 右上角跳过按钮
             UI.Panel {
@@ -1814,35 +1842,17 @@ end
 function TrialState.OnMouseMove()
 end
 
-function TrialState.OnTouchBegin(x, y)
-    local dpr = graphics:GetDPR()
-    local tx = x / dpr
-    
-    if tx > screenW_ * 0.75 then
-        StartAttack(2)  -- 右侧区域 = 招式2
-    elseif tx > screenW_ * 0.55 then
-        StartAttack(1)  -- 中右区域 = 招式1
-    elseif tx > screenW_ * 0.3 then
-        DoJump()
-    end
+-- 触摸事件委托给 VirtualPad 模块
+function TrialState.OnTouchBegin(x, y, touchID)
+    VirtualPad.OnTouchBegin(x, y, touchID)
 end
 
-function TrialState.OnTouchMove(x, y)
-    local dpr = graphics:GetDPR()
-    local tx = x / dpr
-    
-    if tx < screenW_ * 0.2 then
-        inputLeft_ = true
-        inputRight_ = false
-    elseif tx < screenW_ * 0.4 then
-        inputRight_ = true
-        inputLeft_ = false
-    end
+function TrialState.OnTouchMove(x, y, touchID)
+    VirtualPad.OnTouchMove(x, y, touchID)
 end
 
-function TrialState.OnTouchEnd(x, y)
-    inputLeft_ = false
-    inputRight_ = false
+function TrialState.OnTouchEnd(x, y, touchID)
+    VirtualPad.OnTouchEnd(x, y, touchID)
 end
 
 -- ============================================================================
@@ -1968,9 +1978,17 @@ function TrialState.Render(vg)
     Renderer.RenderCombo(vg, S)
     Renderer.RenderTransformEffect(vg, S)
     
+    -- 手机端虚拟操控绘制
+    if VirtualPad.IsActive() then
+        VirtualPad.UpdateLayout(screenW_, screenH_)
+        VirtualPad.Render(vg)
+    end
+    
     nvgResetTransform(vg)
     nvgEndFrame(vg)
 end
+
+
 
 -- ============================================================================
 -- 木桩攻击系统
