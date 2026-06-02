@@ -755,24 +755,35 @@ function Renderer.RenderDeflectedWeapon(vg, S)
     -- 缩放：略微缩小表示远离
     local scale = (1.0 - t * 0.3) * S.physScale
 
-    -- 使用锻造师剑图片渲染弹飞武器
-    if S.dummySwordImage and S.dummySwordImage ~= 0 then
-        local imgW = 40 * scale
-        local imgH = 80 * scale
+    -- 根据被击飞方选择渲染哪个武器
+    local isDummyDeflected = (S.deflectTarget == "dummy")
 
-        nvgSave(vg)
-        nvgGlobalAlpha(vg, alpha / 255)
-        nvgTranslate(vg, wx, wy)
-        nvgRotate(vg, weaponAngle)
-
-        local imgPaint = nvgImagePattern(vg, -imgW / 2, -imgH / 2, imgW, imgH, 0, S.dummySwordImage, 1.0)
-        nvgBeginPath(vg)
-        nvgRect(vg, -imgW / 2, -imgH / 2, imgW, imgH)
-        nvgFillPaint(vg, imgPaint)
-        nvgFill(vg)
-        nvgRestore(vg)
+    if isDummyDeflected then
+        -- 锻造师武器被击飞 → 渲染锻造师的剑
+        if S.dummySwordImage and S.dummySwordImage ~= 0 then
+            local imgW = 40 * scale
+            local imgH = 80 * scale
+            nvgSave(vg)
+            nvgGlobalAlpha(vg, alpha / 255)
+            nvgTranslate(vg, wx, wy)
+            nvgRotate(vg, weaponAngle)
+            local imgPaint = nvgImagePattern(vg, -imgW / 2, -imgH / 2, imgW, imgH, 0, S.dummySwordImage, 1.0)
+            nvgBeginPath(vg)
+            nvgRect(vg, -imgW / 2, -imgH / 2, imgW, imgH)
+            nvgFillPaint(vg, imgPaint)
+            nvgFill(vg)
+            nvgRestore(vg)
+        else
+            local wc = { 180, 60, 60 }
+            nvgSave(vg)
+            nvgGlobalAlpha(vg, alpha / 255)
+            Renderer.RenderWeaponShape(vg, S, wx, wy, weaponAngle, wc, scale, false)
+            nvgRestore(vg)
+        end
     else
-        local wc = { 180, 60, 60 }
+        -- 玩家武器被击飞 → 渲染玩家的武器笔画
+        local gameData = S.gameData
+        local wc = gameData and gameData.weaponColor or { 200, 200, 220 }
         nvgSave(vg)
         nvgGlobalAlpha(vg, alpha / 255)
         Renderer.RenderWeaponShape(vg, S, wx, wy, weaponAngle, wc, scale, false)
@@ -787,25 +798,33 @@ function Renderer.RenderDeflectedWeapon(vg, S)
         local ty = S.deflectStartY + math.sin(S.deflectAngle) * trailDist - 30 * (trailT / S.deflectDuration)
         local trailAlpha = math.floor(alpha * (0.3 - i * 0.08))
         if trailAlpha > 0 then
-            if S.dummySwordImage and S.dummySwordImage ~= 0 then
-                local imgW = 40 * scale * 0.9
-                local imgH = 80 * scale * 0.9
-                nvgSave(vg)
-                nvgGlobalAlpha(vg, trailAlpha / 255)
-                nvgTranslate(vg, tx, ty)
-                local trailAngle = S.deflectWeaponAngle + S.deflectSpin * trailT
-                nvgRotate(vg, trailAngle)
-                local imgPaint = nvgImagePattern(vg, -imgW / 2, -imgH / 2, imgW, imgH, 0, S.dummySwordImage, 1.0)
-                nvgBeginPath(vg)
-                nvgRect(vg, -imgW / 2, -imgH / 2, imgW, imgH)
-                nvgFillPaint(vg, imgPaint)
-                nvgFill(vg)
-                nvgRestore(vg)
+            local trailAngle = S.deflectWeaponAngle + S.deflectSpin * trailT
+            if isDummyDeflected then
+                if S.dummySwordImage and S.dummySwordImage ~= 0 then
+                    local imgW = 40 * scale * 0.9
+                    local imgH = 80 * scale * 0.9
+                    nvgSave(vg)
+                    nvgGlobalAlpha(vg, trailAlpha / 255)
+                    nvgTranslate(vg, tx, ty)
+                    nvgRotate(vg, trailAngle)
+                    local imgPaint = nvgImagePattern(vg, -imgW / 2, -imgH / 2, imgW, imgH, 0, S.dummySwordImage, 1.0)
+                    nvgBeginPath(vg)
+                    nvgRect(vg, -imgW / 2, -imgH / 2, imgW, imgH)
+                    nvgFillPaint(vg, imgPaint)
+                    nvgFill(vg)
+                    nvgRestore(vg)
+                else
+                    nvgSave(vg)
+                    nvgGlobalAlpha(vg, trailAlpha / 255)
+                    Renderer.RenderWeaponShape(vg, S, tx, ty, trailAngle, { 180, 60, 60 }, scale * 0.9, false)
+                    nvgRestore(vg)
+                end
             else
+                local gameData = S.gameData
+                local wc = gameData and gameData.weaponColor or { 200, 200, 220 }
                 nvgSave(vg)
                 nvgGlobalAlpha(vg, trailAlpha / 255)
-                local trailAngle = S.deflectWeaponAngle + S.deflectSpin * trailT
-                Renderer.RenderWeaponShape(vg, S, tx, ty, trailAngle, { 180, 60, 60 }, scale * 0.9, false)
+                Renderer.RenderWeaponShape(vg, S, tx, ty, trailAngle, wc, scale * 0.9, false)
                 nvgRestore(vg)
             end
         end

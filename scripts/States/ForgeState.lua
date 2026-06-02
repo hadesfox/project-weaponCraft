@@ -74,6 +74,7 @@ local GRIND_TIME_LIMIT   = GameSettings.GetGrindTime()  -- 砥砺时间限制
 local GRIND_KEYS         = KeyBindings.GetGrindKeyNames() -- 从按键配置获取显示名
 local grindCount_        = 0      -- 完成打磨次数
 local grindKeyIndex_     = 1      -- 当前期待的按键序列索引（1~3）
+local grindDirection_    = 1      -- 滑动方向: 1=正向(1→3), -1=反向(3→1)
 local grindTimer_        = 0      -- 砥砺已用时间
 local grindDone_         = false  -- 砥砺是否结束
 local grindScore_        = 0      -- 砥砺得分
@@ -86,6 +87,9 @@ local grindLastDragZone_ = 0      -- 上次拖动经过的按键区域索引（0
 
 -- 延迟结束计时器（替代旧的匿名事件订阅）
 local finishTimer_ = -1      -- <0 表示未激活
+
+-- 子阶段说明暂停标志：外部显示黑屏说明时暂停所有游戏更新
+local waitingIntro_ = false
 
 -- 前向声明内部函数（避免全局泄漏）
 local InitHammerPhase
@@ -113,7 +117,7 @@ local onPhaseChange_ = nil
 --- 进入锻造状态
 --- @param gameData table 游戏共享数据
 --- @param onComplete function 锻造完成回调
---- @param onPhaseChange function|nil 阶段切换回调(phaseStr) "quench"/"grind"
+--- @param onPhaseChange function|nil 阶段切换回调(phaseStr, resumeFn) "hammer"/"quench"/"grind"
 function ForgeState.Enter(gameData, onComplete, onPhaseChange)
     gameData_    = gameData
     onComplete_  = onComplete
@@ -122,6 +126,7 @@ function ForgeState.Enter(gameData, onComplete, onPhaseChange)
     phaseTimer_   = 0
     totalScore_   = 0
     finishTimer_  = -1
+    waitingIntro_ = false
     
     -- 预创建音频节点和音源（避免首次播放延迟）
     audioScene_ = Scene()
@@ -163,7 +168,7 @@ function ForgeState.Enter(gameData, onComplete, onPhaseChange)
         grindSource_:Play(grindSound_)  -- 静音播放预热
     end
     
-    -- 初始化锤击
+    -- 初始化锤击（不再等待说明，由外部先显示 forge 整体说明后再 Enter）
     InitHammerPhase()
     
     print("[ForgeState] Entered. Weapon type: " .. tostring(gameData_.weaponType))
@@ -220,6 +225,7 @@ function ForgeState.Leave()
     quenchTimer_     = 0
     grindCount_      = 0
     grindKeyIndex_   = 1
+    grindDirection_  = 1
     grindTimer_      = 0
     grindDone_       = false
     grindScore_      = 0
@@ -229,6 +235,7 @@ function ForgeState.Leave()
     grindResultTimer_ = 0
     grindDragging_   = false
     grindLastDragZone_ = 0
+    waitingIntro_    = false
     gameData_        = nil
     onComplete_      = nil
     onPhaseChange_   = nil
@@ -294,6 +301,7 @@ InitGrindPhase = function()
     GRIND_TIME_LIMIT  = GameSettings.GetGrindTime()  -- 刷新用户设置
     grindCount_       = 0
     grindKeyIndex_    = 1
+    grindDirection_   = 1
     grindTimer_       = 0
     grindDone_        = false
     grindScore_       = 0
@@ -305,7 +313,7 @@ InitGrindPhase = function()
     grindLastDragZone_ = 0
     phaseTimer_       = 0
     
-    print("[Forge/Grind] Start! Press J→K→L or drag across keys to grind, time limit: " .. GRIND_TIME_LIMIT .. "s")
+    print("[Forge/Grind] Start! Slide back and forth across keys to grind, time limit: " .. GRIND_TIME_LIMIT .. "s")
 end
 
 
@@ -364,6 +372,9 @@ end
 
 --- 更新
 function ForgeState.Update(dt)
+    -- 子阶段说明黑屏显示时暂停
+    if waitingIntro_ then return end
+    
     -- 延迟结束计时器
     if finishTimer_ >= 0 then
         finishTimer_ = finishTimer_ + dt
@@ -423,12 +434,18 @@ UpdateHammer = function(dt)
     if hammerFlash_ > 0 then hammerFlash_ = hammerFlash_ - dt * 4 end
     if hammerShake_ > 0 then hammerShake_ = hammerShake_ - dt * 6 end
     
-    -- 如果已完成锤击，等待结果展示时间，然后等待玩家点击
+    -- 如果已完成锤击，等待结果展示后自动进入淬火
     if hammerDone_ then
-        if not hammerWaitClick_ then
-            hammerResultTimer_ = hammerResultTimer_ + dt
-            if hammerResultTimer_ >= HAMMER_RESULT_DURATION then
-                hammerWaitClick_ = true  -- 展示完毕，等待玩家点击
+        hammerResultTimer_ = hammerResultTimer_ + dt
+        if hammerResultTimer_ >= HAMMER_RESULT_DURATION then
+            -- 自动转入淬火阶段（通过回调显示子阶段说明黑屏）
+            currentPhase_ = PHASE_QUENCH
+            InitQuenchPhase()
+            if onPhaseChange_ then
+                waitingIntro_ = true
+                onPhaseChange_("quench", function()
+                    waitingIntro_ = false
+                end)
             end
         end
         return
@@ -510,7 +527,7 @@ UpdateQuench = function(dt)
 end
 
 
---- 结束淬火，计算得分，进入砥砺等待
+--- 结束淬火，计算得分，自动进入砥砺
 FinishQuench = function()
     if quenchDone_ then return end
     quenchDone_  = true
@@ -534,9 +551,18 @@ FinishQuench = function()
     end
     
     totalScore_ = totalScore_ + quenchScore_
-    grindWaitClick_ = true  -- 等待玩家点击进入砥砺
     
     print("[Forge/Quench] Done! Temp: " .. math.floor(quenchTemp_) .. " Target: " .. quenchTarget_ .. " Diff: " .. math.floor(diff) .. " Score: " .. quenchScore_)
+    
+    -- 自动转入砥砺阶段（通过回调显示子阶段说明黑屏）
+    currentPhase_ = PHASE_GRIND
+    InitGrindPhase()
+    if onPhaseChange_ then
+        waitingIntro_ = true
+        onPhaseChange_("grind", function()
+            waitingIntro_ = false
+        end)
+    end
 end
 
 
@@ -601,6 +627,7 @@ end
 
 
 --- 检测逻辑坐标(lx, ly)在哪个砥砺按键区域，返回1~3或0(不在任何区域)
+--- 热区为整个方块条带（高度放大，方便来回滑动）
 GetGrindZoneAtPos = function(lx, ly)
     local w = graphics:GetWidth() / graphics:GetDPR()
     local h = graphics:GetHeight() / graphics:GetDPR()
@@ -611,19 +638,31 @@ GetGrindZoneAtPos = function(lx, ly)
     local keySpacing = 56
     local keysStartX = cx - (#GRIND_KEYS - 1) * keySpacing / 2
     local keysY = cy + wheelR + 30
-    local hitH = keyBoxW  -- 点击热区高度与按键方框一致
+    local hitH = keyBoxW * 2  -- 加高热区，方便来回滑动
 
+    -- 先检测 Y 是否在条带范围内
+    if ly < keysY - hitH / 2 or ly > keysY + hitH / 2 then
+        return 0
+    end
+
+    -- 按 X 区域判断属于哪个方块（使用方块间中点作为分界）
     for i = 1, #GRIND_KEYS do
         local kx = keysStartX + (i - 1) * keySpacing
-        if lx >= kx - keyBoxW / 2 and lx <= kx + keyBoxW / 2 and
-           ly >= keysY - hitH / 2 and ly <= keysY + hitH / 2 then
-            return i
+        local halfZone = keySpacing / 2
+        if i == 1 then
+            -- 最左方块：左边界延伸
+            if lx <= kx + halfZone then return i end
+        elseif i == #GRIND_KEYS then
+            -- 最右方块：右边界延伸
+            if lx >= kx - halfZone then return i end
+        else
+            if lx >= kx - halfZone and lx <= kx + halfZone then return i end
         end
     end
     return 0
 end
 
---- 处理砥砺拖动：鼠标/触摸进入新的按键区域时触发
+--- 处理砥砺拖动：鼠标/触摸进入新的按键区域时触发（来回滑动）
 HandleGrindDrag = function(lx, ly)
     if currentPhase_ ~= PHASE_GRIND or grindDone_ then return end
 
@@ -633,19 +672,25 @@ HandleGrindDrag = function(lx, ly)
 
     grindLastDragZone_ = zone
 
-    -- 与按键逻辑相同：必须按顺序
+    -- 来回滑动逻辑：正向 1→2→3，到底反向 3→2→1，再正向，一个来回算一次
     if zone == grindKeyIndex_ then
-        grindKeyIndex_ = grindKeyIndex_ + 1
+        grindKeyIndex_ = grindKeyIndex_ + grindDirection_
         grindFlash_ = 1.0
         if grindSource_ and grindSound_ then
             grindSource_.gain = 0.7
             grindSource_:Play(grindSound_)
             BGM.DuckForSFX(0.4)
         end
+        -- 到达右端，切换为反向
         if grindKeyIndex_ > #GRIND_KEYS then
-            grindCount_ = grindCount_ + 1
+            grindDirection_ = -1
+            grindKeyIndex_ = #GRIND_KEYS
+        -- 到达左端（完成一个来回），切换为正向，计数+1
+        elseif grindKeyIndex_ < 1 then
+            grindDirection_ = 1
             grindKeyIndex_ = 1
-            grindLastDragZone_ = 0  -- 完成一轮后重置，允许从头再来
+            grindCount_ = grindCount_ + 1
+            grindLastDragZone_ = 0  -- 完成一轮后重置
         end
     end
 end
@@ -686,16 +731,10 @@ end
 --- 处理玩家点击（锤击判定）
 OnForgeInput = function()
     if finishTimer_ >= 0 then return end  -- 等待结束中忽略输入
+    if waitingIntro_ then return end      -- 子阶段说明显示中忽略输入
     
     if currentPhase_ == PHASE_HAMMER then
-        -- 锤击完成后等待点击进入淬火
-        if hammerWaitClick_ then
-            currentPhase_ = PHASE_QUENCH
-            InitQuenchPhase()
-            if onPhaseChange_ then onPhaseChange_("quench") end
-            return
-        end
-        -- 锤击结果展示中忽略输入
+        -- 锤击结果展示中忽略输入（会自动转入淬火）
         if hammerDone_ then return end
         -- 必须冷却完毕才能再次锤击
         if not hammerReady_ then return end
@@ -725,14 +764,6 @@ OnForgeInput = function()
             PlayHammerSound()
         end
     elseif currentPhase_ == PHASE_QUENCH then
-        -- 淬火完成后等待点击进入砥砺
-        if quenchDone_ and grindWaitClick_ then
-            grindWaitClick_ = false
-            currentPhase_ = PHASE_GRIND
-            InitGrindPhase()
-            if onPhaseChange_ then onPhaseChange_("grind") end
-            return
-        end
         if not quenchDone_ then
             quenchHolding_ = true
             StartQuenchSound()
@@ -742,6 +773,7 @@ end
 
 
 OnForgeInputRelease = function()
+    if waitingIntro_ then return end
     if currentPhase_ == PHASE_QUENCH and not quenchDone_ then
         -- 松开即结束淬火（与超时效果相同）
         if quenchHolding_ then
@@ -758,30 +790,35 @@ function ForgeState.OnKeyDown(key)
         return
     end
     
-    -- 砥砺阶段：按键处理
+    -- 砥砺阶段：按键处理（来回滑动：J→K→L→K→J 为一轮）
     if currentPhase_ == PHASE_GRIND and not grindDone_ then
         local grindIdx = KeyBindings.GetGrindIndex(key)
         
         if grindIdx then
-            -- grindKeyIndex_ 是当前期望的序列位置(1/2/3)
             if grindIdx == grindKeyIndex_ then
                 -- 按对了，播放磨刀音效
-                grindKeyIndex_ = grindKeyIndex_ + 1
+                grindKeyIndex_ = grindKeyIndex_ + grindDirection_
                 grindFlash_ = 1.0
                 if grindSource_ and grindSound_ then
                     grindSource_.gain = 0.7
                     grindSource_:Play(grindSound_)
-                    BGM.DuckForSFX(0.4)  -- 打磨音效短暂压低BGM
+                    BGM.DuckForSFX(0.4)
                 end
+                -- 到达右端，切换为反向
                 if grindKeyIndex_ > #GRIND_KEYS then
-                    -- 完成一轮打磨
-                    grindCount_ = grindCount_ + 1
+                    grindDirection_ = -1
+                    grindKeyIndex_ = #GRIND_KEYS
+                -- 到达左端（完成一个来回），切换为正向，计数+1
+                elseif grindKeyIndex_ < 1 then
+                    grindDirection_ = 1
                     grindKeyIndex_ = 1
+                    grindCount_ = grindCount_ + 1
                     print("[Forge/Grind] Completed cycle #" .. grindCount_)
                 end
             else
-                -- 按错了，重置当前轮序列
+                -- 按错了，重置方向和序列
                 grindKeyIndex_ = 1
+                grindDirection_ = 1
                 grindMissFlash_ = 1.0
             end
         end
@@ -862,7 +899,15 @@ end
 -- NanoVG 渲染（由 main.lua HandleNanoVGRender 调用）
 -- ============================================================================
 
+--- 查询是否正在等待子阶段说明
+function ForgeState.IsWaitingIntro()
+    return waitingIntro_
+end
+
 function ForgeState.Render(vg)
+    -- 子阶段说明黑屏显示时不渲染游戏内容（PhaseIntro UI 覆盖）
+    if waitingIntro_ then return end
+    
     local w   = graphics:GetWidth()
     local h   = graphics:GetHeight()
     local dpr = graphics:GetDPR()
@@ -908,6 +953,7 @@ function ForgeState.Render(vg)
         -- 砥砺
         grindCount = grindCount_,
         grindKeyIndex = grindKeyIndex_,
+        grindDirection = grindDirection_,
         grindTimer = grindTimer_,
         grindDone = grindDone_,
         grindScore = grindScore_,

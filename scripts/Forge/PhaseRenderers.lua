@@ -235,13 +235,8 @@ local function RenderHammerHUD(vg, w, cx, cy, dotsY, S)
         nvgText(vg, cx, cy - 10, gradeText, nil)
 
         nvgFontSize(vg, 14)
-        if S.hammerWaitClick then
-            nvgFillColor(vg, nvgRGBA(160, 140, 90, 255))
-            nvgText(vg, cx, cy + 16, "👆 点击进入淬火", nil)
-        else
-            nvgFillColor(vg, nvgRGBA(120, 130, 140, 180))
-            nvgText(vg, cx, cy + 16, "准备进入淬火...", nil)
-        end
+        nvgFillColor(vg, nvgRGBA(120, 130, 140, 180))
+        nvgText(vg, cx, cy + 16, "准备进入淬火...", nil)
         return
     end
 
@@ -470,12 +465,7 @@ function PhaseRenderers.RenderQuenchPhase(vg, w, h, S)
         nvgFontSize(vg, statusFontSz)
         nvgText(vg, cx, statusY, resultText, nil)
 
-        -- 等待点击进入砥砺
-        if S.grindWaitClick then
-            nvgFontSize(vg, subFontSz)
-            nvgFillColor(vg, nvgRGBA(C_GOLD[1], C_GOLD[2], C_GOLD[3], 220))
-            nvgText(vg, cx, statusY + statusFontSz + 4, "👆 点击进入砥砺", nil)
-        end
+        -- 淬火完成提示（自动过渡，无需点击）
     else
         nvgFillColor(vg, nvgRGBA(255, 255, 255, 230))
         nvgFontSize(vg, statusFontSz)
@@ -560,10 +550,20 @@ function PhaseRenderers.RenderGrindPhase(vg, w, h, S)
     local keysStartX = cx - (#GRIND_KEYS - 1) * keySpacing / 2
     local keysY = cy + wheelR + 30
 
+    local dir = S.grindDirection or 1
+
     for i = 1, #GRIND_KEYS do
         local kx = keysStartX + (i - 1) * keySpacing
         local isActive = (i == S.grindKeyIndex) and not S.grindDone
-        local isDone = i < S.grindKeyIndex
+        -- 已经过的按键：正向时 i < index，反向时 i > index
+        local isDone = false
+        if not S.grindDone then
+            if dir == 1 then
+                isDone = (i < S.grindKeyIndex)
+            else
+                isDone = (i > S.grindKeyIndex)
+            end
+        end
 
         -- 按键方框
         nvgBeginPath(vg)
@@ -667,13 +667,6 @@ function PhaseRenderers.RenderGrindPhase(vg, w, h, S)
         nvgFontSize(vg, 12)
         nvgFillColor(vg, nvgRGBA(120, 130, 140, 180))
         nvgText(vg, cx, cy + 30, "锻造完毕，准备试炼...", nil)
-    else
-        -- 操作提示
-        nvgFontFaceId(vg, fontId)
-        nvgFontSize(vg, 13)
-        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
-        nvgFillColor(vg, nvgRGBA(120, 130, 140, 200))
-        nvgText(vg, cx, keysY + keyBoxW / 2 + 12, "依次按 J → K → L 完成一次打磨!", nil)
     end
 end
 

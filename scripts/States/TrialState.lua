@@ -1258,6 +1258,7 @@ function TrialState.Render(vg)
         S.deflectAngle = dd.angle or 0
         S.deflectSpin = dd.spin or 0
         S.deflectWeaponAngle = dd.weaponAngle or 0
+        S.deflectTarget = dd.target or "player"
     end
     
     nvgBeginFrame(vg, w, h, 1.0)

@@ -537,13 +537,21 @@ local function DoSwitchState(newState)
         PhaseIntro.Show(newState, function()
             ForgeState.Enter(gameData_, function()
                 SwitchState(Config.States.RESULT)
-            end, function(forgePhase)
-                -- ForgeState 内部阶段切换回调（非阻塞，只播放音效和碎片）
-                -- forgePhase: "quench" → 倒数变2, "grind" → 倒数变1
+            end, function(forgePhase, resumeFn)
+                -- ForgeState 内部阶段切换回调：显示子阶段说明黑屏
+                -- forgePhase: "quench"/"grind", resumeFn: 黑屏结束后调用恢复游戏
                 if forgePhase == "quench" then
                     PhaseOverlay.TransitionTo(2, nil, false)
+                    PhaseIntro.Show("forge_quench", function()
+                        BuildForgeUI()
+                        if resumeFn then resumeFn() end
+                    end)
                 elseif forgePhase == "grind" then
                     PhaseOverlay.TransitionTo(1, nil, false)
+                    PhaseIntro.Show("forge_grind", function()
+                        BuildForgeUI()
+                        if resumeFn then resumeFn() end
+                    end)
                 end
             end)
             BuildForgeUI()

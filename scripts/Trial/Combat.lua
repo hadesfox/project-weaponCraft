@@ -51,6 +51,12 @@ local deflectStartY_ = 0
 local deflectAngle_ = 0
 local deflectSpin_ = 0
 local deflectWeaponAngle_ = 0
+local deflectTarget_ = "player"  -- "player" 或 "dummy"，标识被击飞武器归属
+
+-- 攻击开始时间戳（用于判断先后出手）
+local playerAttackStartTime_ = 0
+local dummyAttackStartTime_ = 0
+local globalTime_ = 0
 
 -- 木桩武器
 local dummyWeapon_ = nil
@@ -146,6 +152,10 @@ function Combat.Init(ctx)
     weaponClashCooldown_ = 0
     deflecting_ = false
     deflectTimer_ = 0
+    deflectTarget_ = "player"
+    playerAttackStartTime_ = 0
+    dummyAttackStartTime_ = 0
+    globalTime_ = 0
     dummyWeapon_ = nil
     Combat.InitDummyWeapon()
 end
@@ -178,6 +188,7 @@ function Combat.GetDeflectData()
         angle = deflectAngle_, spin = deflectSpin_,
         weaponAngle = deflectWeaponAngle_, timer = deflectTimer_,
         duration = deflectDuration_,
+        target = deflectTarget_,  -- "player" 或 "dummy"
     }
 end
 function Combat.GetWeaponClashAnim() return weaponClashAnim_ end
@@ -206,6 +217,7 @@ function Combat.StartAttack(index)
     currentAttack_ = attacks_[idx]
     attacking_ = true
     attackTimer_ = 0
+    playerAttackStartTime_ = globalTime_
     local gameData = ctx_.gameData.getGameData()
     local speedBonus = gameData.attackSpeedBonus or 0
     local totalSpeedMod = speedBonus + ctx_.gameData.getMaterialSpdMod()
@@ -216,6 +228,7 @@ end
 
 --- 更新攻击进度
 function Combat.UpdateAttack(dt)
+    globalTime_ = globalTime_ + dt
     if not attacking_ then return end
 
     attackTimer_ = attackTimer_ + dt
@@ -425,7 +438,7 @@ function Combat.CheckAttackCollision(progress)
     -- 先检测武器格挡
     Combat.CheckWeaponClash(progress)
 
-    -- 未被格挡才检测木桩
+    -- 未被格挡才检测木桩（格挡后双方均不造成伤害）
     if not deflecting_ then
         Combat.CheckDummyCollision(progress)
     end
@@ -536,7 +549,8 @@ function Combat.UpdateDummyAttack(dt)
     dummyAttackTimer_ = 0
     dummyAttackProgress_ = 0
     dummyHitPlayer_ = false
-    dummyAttackDuration_ = dummyCurrentAttack_.duration * 0.7
+    dummyAttackStartTime_ = globalTime_
+    dummyAttackDuration_ = 0.15 + math.random() * 0.35  -- 随机攻速 0.15~0.5s
 end
 
 --- 锻造师移动追击
@@ -811,13 +825,61 @@ function Combat.CheckWeaponClash(progress)
         weaponClashY_ = (midPY + midDY) / 2
         weaponClashAnim_ = 1.0
 
-        local pushDir = player.facingRight and -1 or 1
-        player.vx = pushDir * dw.force * physScale * 8
-        player.vy = -dw.force * physScale * 3
-        player.onGround = false
+        -- 判断先后出手：先出手的武器被击飞
+        local playerFirst = (playerAttackStartTime_ <= dummyAttackStartTime_)
 
-        dummy.hitAnim = 0.6
-        dummy.hitDir = playerWeapon.forceDir
+        if playerFirst then
+            -- 玩家先出手 → 玩家武器被击飞，玩家被推回
+            deflectTarget_ = "player"
+            local pushDir = player.facingRight and -1 or 1
+            player.vx = pushDir * dw.force * physScale * 8
+            player.vy = -dw.force * physScale * 3
+            player.onGround = false
+
+            dummy.hitAnim = 0.6
+            dummy.hitDir = playerWeapon.forceDir
+
+            -- 弹飞角度：玩家武器被向玩家方向弹开
+            deflectAngle_ = math.atan2(
+                playerWeapon.tipY - weaponClashY_,
+                playerWeapon.tipX - weaponClashX_
+            )
+            local pdir = player.facingRight and 1 or -1
+            deflectWeaponAngle_ = pdir * math.pi / 4
+            deflectSpin_ = pdir * (-12)
+
+            -- 取消玩家攻击
+            attacking_ = false
+            currentAttack_ = nil
+        else
+            -- 锻造师先出手 → 锻造师武器被击飞，锻造师被推回
+            deflectTarget_ = "dummy"
+            local pushDir = dummyFacingRight_ and -1 or 1
+            dummy.hitAnim = 0.8
+            dummy.hitDir = pushDir * (-1)
+
+            player.vx = 0  -- 玩家不被推回
+
+            -- 弹飞角度：锻造师武器被向锻造师方向弹开
+            deflectAngle_ = math.atan2(
+                dw.tipY - weaponClashY_,
+                dw.tipX - weaponClashX_
+            )
+            local ddir = dummyFacingRight_ and 1 or -1
+            deflectWeaponAngle_ = ddir * math.pi / 4
+            deflectSpin_ = ddir * (-12)
+
+            -- 取消锻造师攻击
+            dummyAttacking_ = false
+            dummyCurrentAttack_ = nil
+            dummyAttackProgress_ = 0
+            dummyHitPlayer_ = false
+            dummyAttackCooldown_ = 0.5
+        end
+
+        -- 格挡后双方本次攻击均不造成伤害
+        attackHitDummy_ = true
+        dummyHitPlayer_ = true
 
         hitEffects[#hitEffects + 1] = {
             x = weaponClashX_, y = weaponClashY_ - 20,
@@ -843,12 +905,6 @@ function Combat.CheckWeaponClash(progress)
         deflectTimer_ = 0
         deflectStartX_ = weaponClashX_
         deflectStartY_ = weaponClashY_
-        deflectAngle_ = dw.angle
-        local pdir = player.facingRight and 1 or -1
-        deflectWeaponAngle_ = pdir * math.pi / 4
-        deflectSpin_ = pdir * (-12)
-        attacking_ = false
-        currentAttack_ = nil
     end
 end
 
