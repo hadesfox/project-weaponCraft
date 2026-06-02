@@ -82,7 +82,7 @@ local dummy_ = nil
 local dummyDef_ = nil
 
 -- 木桩攻击/武器碰撞/格挡弹开 → Trial/Combat.lua
-local dummyAttacks_ = {}             -- 锻造师专用攻击组（斧）
+local dummyAttacks_ = {}             -- 锻造师专用攻击组（剑）
 
 -- 材质效果系统
 local materialEffect_ = nil     -- 当前材质效果ID（字符串）
@@ -112,6 +112,8 @@ local uiRoot_ = nil
 
 -- 敌人贴图
 local enemyImage_ = nil
+-- 锻造师武器贴图
+local dummySwordImage_ = nil
 
 -- ============================================================================
 -- 试炼场计时与结算系统
@@ -248,6 +250,8 @@ function TrialState.Enter(gameData, onComplete)
     end
     -- 加载敌人贴图
     enemyImage_ = nvgCreateImage(NVG.Get(), Config.Trial.EnemyImage, 0)
+    -- 加载锻造师武器贴图
+    dummySwordImage_ = nvgCreateImage(NVG.Get(), Config.Trial.DummySwordImage, 0)
     playerFrameIndex_ = 1
     playerFrameTimer_ = 0
     
@@ -259,7 +263,7 @@ function TrialState.Enter(gameData, onComplete)
     Slime.Init(screenW_, screenH_, groundY_, physScale_)
     
     -- 初始化战斗系统（攻击、木桩AI、武器碰撞）
-    dummyAttacks_ = Config.Attacks.AXE
+    dummyAttacks_ = Config.Attacks.SWORD
     Combat.Init({
         player = player_,
         dummy = dummy_,
@@ -481,6 +485,10 @@ function TrialState.Leave()
     if enemyImage_ and enemyImage_ ~= 0 then
         nvgDeleteImage(NVG.Get(), enemyImage_)
         enemyImage_ = nil
+    end
+    if dummySwordImage_ and dummySwordImage_ ~= 0 then
+        nvgDeleteImage(NVG.Get(), dummySwordImage_)
+        dummySwordImage_ = nil
     end
     for i = 1, #playerRunFrames_ do
         if playerRunFrames_[i] and playerRunFrames_[i] ~= 0 then
@@ -1127,6 +1135,7 @@ function TrialState.OnKeyDown(key)
 end
 
 function TrialState.OnMouseDown(button)
+    if trialEnded_ then return end
     if button == MOUSEB_LEFT then
         Combat.StartAttack(1)  -- 左键 = 招式1
     elseif button == MOUSEB_RIGHT then
@@ -1142,14 +1151,17 @@ end
 
 -- 触摸事件委托给 VirtualPad 模块
 function TrialState.OnTouchBegin(x, y, touchID)
+    if trialEnded_ then return end
     VirtualPad.OnTouchBegin(x, y, touchID)
 end
 
 function TrialState.OnTouchMove(x, y, touchID)
+    if trialEnded_ then return end
     VirtualPad.OnTouchMove(x, y, touchID)
 end
 
 function TrialState.OnTouchEnd(x, y, touchID)
+    if trialEnded_ then return end
     VirtualPad.OnTouchEnd(x, y, touchID)
 end
 
@@ -1219,6 +1231,7 @@ function TrialState.Render(vg)
         currentForm = currentForm_,
         gameData = gameData_,
         enemyImage = enemyImage_,
+        dummySwordImage = dummySwordImage_,
         targetDefs = targetDefs_,
         playerImage = playerImage_,
         playerRunFrames = playerRunFrames_,

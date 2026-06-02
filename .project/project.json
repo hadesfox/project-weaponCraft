@@ -5,7 +5,7 @@
     "id": "1694489473"
   },
   "entry": "main.lua",
-  "version": "1.0.26",
+  "version": "1.0.28",
   "taptap_publish": {
     "title": "武器角斗",
     "description": "画出武器、锻造成型、试炼出击！一款融合涂鸦绘制与横版动作的创意休闲游戏。60秒内击败锻造师，提交成绩挑战全服排行榜！",
@@ -21,16 +21,16 @@
   "assets": {
     "icon": "./game_material/icon_anvil.png",
     "screenshots": [
-      "./game_material/SCREENSHOT_2026-05-31T03-30-25_01.png",
-      "./game_material/SCREENSHOT_2026-05-31T03-30-25_02.png",
-      "./game_material/SCREENSHOT_2026-05-31T03-30-25_03.png"
+      "./assets/image/QQ20260601-110038.png",
+      "./assets/image/QQ20260601-110057.png",
+      "./assets/image/QQ20260601-110107.png"
     ],
     "promotional_image": "./game_material/QQ20260531-122733.png",
     "icon_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_jkr1/icon_anvil.png",
     "screenshot_urls": [
-      "https://tapcode-sce.spark.xd.com/assets/game_material/锻造师/SCREENSHOT_2026-05-31T03-30-25_01.png",
-      "https://tapcode-sce.spark.xd.com/assets/game_material/锻造师/SCREENSHOT_2026-05-31T03-30-25_02.png",
-      "https://tapcode-sce.spark.xd.com/assets/game_material/锻造师/SCREENSHOT_2026-05-31T03-30-25_03.png"
+      "https://tapcode-sce.spark.xd.com/assets/game_material/p_jkr1/QQ20260601-110038.png",
+      "https://tapcode-sce.spark.xd.com/assets/game_material/p_jkr1/QQ20260601-110057.png",
+      "https://tapcode-sce.spark.xd.com/assets/game_material/p_jkr1/QQ20260601-110107.png"
     ],
     "promotional_image_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_jkr1/QQ20260531-122733.png",
     "cover_vertical": "./.project/game_material/COVER_VERTICAL_2026-05-31T05-31-44_01.png",
@@ -39,7 +39,7 @@
     "cover_horizontal_url": "https://tapcode-sce.spark.xd.com/assets/game_material/武器角斗/COVER_HORIZONTAL_2026-05-31T05-31-44_01.png"
   },
   "metadata": {
-    "updated_at": "2026-05-31T05:34:32.214Z",
+    "updated_at": "2026-06-01T03:11:20.969Z",
     "promo_dependent_hash": "786e80bda7f1ae153a1aeac6eb857476"
   }
 }

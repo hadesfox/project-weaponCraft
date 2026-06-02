@@ -241,6 +241,25 @@ function PhaseOverlay.Start()
     print("[PhaseOverlay] Started at phase 5")
 end
 
+--- 停止并释放所有状态（返回主菜单时调用）
+function PhaseOverlay.Stop()
+    active_ = false
+    currentPhase_ = -1
+    fragments_ = {}
+    gateShards_ = {}
+    shatterTriggered_ = false
+    finalShatter_.active = false
+    finalShatter_.timer = 0
+    transition_.active = false
+    transition_.blocking = false
+    transition_.timer = 0
+    transition_.onDone = nil
+    heartbeat_.enabled = false
+    heartbeat_.timer = 0
+    heartbeat_.pulse = 0
+    print("[PhaseOverlay] Stopped and released")
+end
+
 function PhaseOverlay.GetPhase()
     return currentPhase_
 end

@@ -15,6 +15,7 @@ local MenuState = require("States.MenuState")
 local PhaseOverlay = require("PhaseOverlay")
 local KeyBindings = require("KeyBindings")
 local PauseMenu = require("PauseMenu")
+local PhaseIntro = require("PhaseIntro")
 
 -- ============================================================================
 -- BGM 系统
@@ -518,47 +519,56 @@ local function DoSwitchState(newState)
         uiRoot_ = MenuState.BuildUI()
         UI.SetRoot(uiRoot_)
     elseif newState == Config.States.DRAW then
-        BGM.PlayPrep()  -- 开始播放战前准备音乐（贯穿五个锻造环节）
-        DrawState.Enter(gameData_, function()
-            SwitchState(Config.States.MATERIAL)
-        end)
-        BuildDrawUI()
-    elseif newState == Config.States.MATERIAL then
-        MaterialState.Enter(gameData_, function()
-            SwitchState(Config.States.FORGE)
-        end)
-        BuildMaterialUI()
-    elseif newState == Config.States.FORGE then
-        ForgeState.Enter(gameData_, function()
-            SwitchState(Config.States.RESULT)
-        end, function(forgePhase)
-            -- ForgeState 内部阶段切换回调（非阻塞，只播放音效和碎片）
-            -- forgePhase: "quench" → 倒数变2, "grind" → 倒数变1
-            if forgePhase == "quench" then
-                PhaseOverlay.TransitionTo(2, nil, false)
-            elseif forgePhase == "grind" then
-                PhaseOverlay.TransitionTo(1, nil, false)
-            end
-        end)
-        BuildForgeUI()
-    elseif newState == Config.States.RESULT then
-        -- 进入结果/试炼前 → 最终破碎（从阶段1→0）
-        ResultState.Enter(gameData_, function()
-            -- 从 Result 进入 Trial 时触发最终破碎
-            PhaseOverlay.TransitionTo(0, function()
-                DoSwitchState(Config.States.TRIAL)
+        PhaseIntro.Show(newState, function()
+            BGM.PlayPrep()  -- 开始播放战前准备音乐（贯穿五个锻造环节）
+            DrawState.Enter(gameData_, function()
+                SwitchState(Config.States.MATERIAL)
             end)
+            BuildDrawUI()
         end)
-        BuildResultUI()
+    elseif newState == Config.States.MATERIAL then
+        PhaseIntro.Show(newState, function()
+            MaterialState.Enter(gameData_, function()
+                SwitchState(Config.States.FORGE)
+            end)
+            BuildMaterialUI()
+        end)
+    elseif newState == Config.States.FORGE then
+        PhaseIntro.Show(newState, function()
+            ForgeState.Enter(gameData_, function()
+                SwitchState(Config.States.RESULT)
+            end, function(forgePhase)
+                -- ForgeState 内部阶段切换回调（非阻塞，只播放音效和碎片）
+                -- forgePhase: "quench" → 倒数变2, "grind" → 倒数变1
+                if forgePhase == "quench" then
+                    PhaseOverlay.TransitionTo(2, nil, false)
+                elseif forgePhase == "grind" then
+                    PhaseOverlay.TransitionTo(1, nil, false)
+                end
+            end)
+            BuildForgeUI()
+        end)
+    elseif newState == Config.States.RESULT then
+        PhaseIntro.Show(newState, function()
+            ResultState.Enter(gameData_, function()
+                -- 从 Result 进入 Trial 时触发最终破碎
+                PhaseOverlay.TransitionTo(0, function()
+                    DoSwitchState(Config.States.TRIAL)
+                end)
+            end)
+            BuildResultUI()
+        end)
     elseif newState == Config.States.TRIAL then
-        BGM.StopPrep()    -- 停止准备音乐
-        BGM.PlayBattle()  -- 播放试炼场战斗音乐
-        TrialState.Enter(gameData_, function()
-            BGM.StopBattle()  -- 返回菜单时停止战斗音乐
-            ResetGameData()
-            SwitchState(Config.States.MENU)
+        PhaseIntro.Show(newState, function()
+            BGM.StopPrep()    -- 停止准备音乐
+            BGM.PlayBattle()  -- 播放试炼场战斗音乐
+            TrialState.Enter(gameData_, function()
+                BGM.StopBattle()  -- 返回菜单时停止战斗音乐
+                ResetGameData()
+                SwitchState(Config.States.MENU)
+            end)
+            BuildTrialUI()
         end)
-        BuildTrialUI()
     end
 end
 
@@ -691,6 +701,9 @@ function HandleUpdate(eventType, eventData)
     -- 过渡中不更新游戏状态（防止输入干扰）
     if PhaseOverlay.IsTransitioning() then return end
     
+    -- 环节说明界面显示中不更新游戏状态
+    if PhaseIntro.IsActive() then return end
+
     -- 暂停菜单打开时不更新游戏逻辑
     if PauseMenu.IsVisible() then return end
 
@@ -708,6 +721,7 @@ function HandleKeyDown(eventType, eventData)
         return
     end
     if PhaseOverlay.IsTransitioning() then return end
+    if PhaseIntro.IsActive() then return end
 
     -- ESC 暂停菜单拦截（非主菜单状态）
     if key == KEY_ESCAPE and currentState_ ~= Config.States.MENU then
@@ -718,9 +732,14 @@ function HandleKeyDown(eventType, eventData)
         else
             -- 打开暂停菜单
             local pauseOpts = {
+                onResume = function()
+                    -- 恢复游戏 UI
+                    UI.SetRoot(uiRoot_)
+                end,
                 onReturnMenu = function()
                     -- 离开当前状态，重置并回到主界面
                     BGM.StopAll()
+                    PhaseOverlay.Stop()
                     LeaveState(currentState_)
                     ResetGameData()
                     currentState_ = Config.States.MENU
@@ -772,6 +791,7 @@ function HandleMouseDown(eventType, eventData)
         return
     end
     if PhaseOverlay.IsTransitioning() then return end
+    if PhaseIntro.IsActive() then return end
     if PauseMenu.IsVisible() then return end
     local button = eventData["Button"]:GetInt()
     local mod = GetActiveModule()
@@ -781,6 +801,7 @@ end
 function HandleMouseUp(eventType, eventData)
     if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
+    if PhaseIntro.IsActive() then return end
     if PauseMenu.IsVisible() then return end
     local button = eventData["Button"]:GetInt()
     local mod = GetActiveModule()
@@ -790,6 +811,7 @@ end
 function HandleMouseMove(eventType, eventData)
     if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
+    if PhaseIntro.IsActive() then return end
     if PauseMenu.IsVisible() then return end
     local mod = GetActiveModule()
     if mod then mod.OnMouseMove() end
@@ -802,31 +824,37 @@ function HandleTouchBegin(eventType, eventData)
         return
     end
     if PhaseOverlay.IsTransitioning() then return end
+    if PhaseIntro.IsActive() then return end
     if PauseMenu.IsVisible() then return end
     local x = eventData["X"]:GetInt()
     local y = eventData["Y"]:GetInt()
+    local touchID = eventData["TouchID"]:GetInt()
     local mod = GetActiveModule()
-    if mod then mod.OnTouchBegin(x, y) end
+    if mod and mod.OnTouchBegin then mod.OnTouchBegin(x, y, touchID) end
 end
 
 function HandleTouchMove(eventType, eventData)
     if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
+    if PhaseIntro.IsActive() then return end
     if PauseMenu.IsVisible() then return end
     local x = eventData["X"]:GetInt()
     local y = eventData["Y"]:GetInt()
+    local touchID = eventData["TouchID"]:GetInt()
     local mod = GetActiveModule()
-    if mod then mod.OnTouchMove(x, y) end
+    if mod and mod.OnTouchMove then mod.OnTouchMove(x, y, touchID) end
 end
 
 function HandleTouchEnd(eventType, eventData)
     if Intro.IsActive() then return end
     if PhaseOverlay.IsTransitioning() then return end
+    if PhaseIntro.IsActive() then return end
     if PauseMenu.IsVisible() then return end
     local x = eventData["X"]:GetInt()
     local y = eventData["Y"]:GetInt()
+    local touchID = eventData["TouchID"]:GetInt()
     local mod = GetActiveModule()
-    if mod then mod.OnTouchEnd(x, y) end
+    if mod and mod.OnTouchEnd then mod.OnTouchEnd(x, y, touchID) end
 end
 
 --- NanoVG 渲染分发（唯一渲染入口）
@@ -847,9 +875,12 @@ function HandleNanoVGRender(eventType, eventData)
         return
     end
     
-    local mod = GetActiveModule()
-    if mod then mod.Render(vg) end
-    
+    -- 环节说明界面显示中不渲染游戏状态
+    if not PhaseIntro.IsActive() then
+        local mod = GetActiveModule()
+        if mod then mod.Render(vg) end
+    end
+
     -- PhaseOverlay 在所有状态之上渲染（倒数+碎片+黑屏过渡）
     local w = graphics:GetWidth()
     local h = graphics:GetHeight()

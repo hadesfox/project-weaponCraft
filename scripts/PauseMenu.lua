@@ -13,6 +13,7 @@ local visible_ = false
 local overlayRoot_ = nil        -- 暂停菜单 UI 根节点
 local prevUiRoot_ = nil         -- 暂停前的 UI 根节点（用于恢复）
 local onReturnMenu_ = nil       -- "返回主界面"回调
+local onResume_ = nil           -- "继续游戏"回调
 
 --- 判断暂停菜单是否正在显示
 function PauseMenu.IsVisible()
@@ -25,6 +26,7 @@ function PauseMenu.Show(opts)
     if visible_ then return end
     visible_ = true
     onReturnMenu_ = opts and opts.onReturnMenu or nil
+    onResume_ = opts and opts.onResume or nil
 
     local weaponData = opts and opts.weaponData or nil
     local material = opts and opts.material or nil
@@ -65,7 +67,9 @@ function PauseMenu.Show(opts)
                 variant = "primary",
                 width = "100%",
                 onClick = function()
+                    local cb = onResume_
                     PauseMenu.Hide()
+                    if cb then cb() end
                 end,
             },
             -- 返回主界面
@@ -74,8 +78,9 @@ function PauseMenu.Show(opts)
                 variant = "outline",
                 width = "100%",
                 onClick = function()
+                    local cb = onReturnMenu_
                     PauseMenu.Hide()
-                    if onReturnMenu_ then onReturnMenu_() end
+                    if cb then cb() end
                 end,
             },
         },

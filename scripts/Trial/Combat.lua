@@ -105,6 +105,7 @@ function Combat.Init(ctx)
             getGameData = ctx.getGameData,
             getMaterialEffect = ctx.getMaterialEffect,
             getMaterialAtkMod = ctx.getMaterialAtkMod,
+            getMaterialSpdMod = ctx.getMaterialSpdMod,
             getGrowthBonus = ctx.getGrowthBonus,
             setGrowthBonus = ctx.setGrowthBonus,
         }
@@ -228,7 +229,7 @@ function Combat.UpdateAttack(dt)
     end
 
     -- 冲撞前移
-    local player = ctx_.player
+    local player = ctx_.entities.player
     local physScale = ctx_.config.getPhysScale()
     if currentAttack_ and currentAttack_.isCharge then
         local dir = player.facingRight and 1 or -1
@@ -314,7 +315,7 @@ local function HitTarget(index, target, atk, dir)
     local materialEffect = ctx_.gameData.getMaterialEffect()
     local materialAtkMod = ctx_.gameData.getMaterialAtkMod()
     local growthBonus = ctx_.gameData.getGrowthBonus()
-    local player = ctx_.player
+    local player = ctx_.entities.player
     local hitEffects = ctx_.entities.hitEffects
 
     local baseDmg = atk.damage or 150
@@ -377,7 +378,7 @@ end
 function Combat.CheckAttackCollision(progress)
     if not currentAttack_ then return end
 
-    local player = ctx_.player
+    local player = ctx_.entities.player
     local targets = ctx_.entities.targets
     local physScale = ctx_.config.getPhysScale()
 
@@ -432,11 +433,11 @@ end
 
 --- 检测木桩碰撞
 function Combat.CheckDummyCollision(progress)
-    local dummy = ctx_.dummy
+    local dummy = ctx_.entities.dummy
     if not dummy or not currentAttack_ then return end
     if attackHitDummy_ then return end
 
-    local player = ctx_.player
+    local player = ctx_.entities.player
     local physScale = ctx_.config.getPhysScale()
     local hitEffects = ctx_.entities.hitEffects
 
@@ -496,11 +497,11 @@ end
 
 --- 更新木桩攻击AI
 function Combat.UpdateDummyAttack(dt)
-    local dummy = ctx_.dummy
+    local dummy = ctx_.entities.dummy
     if not dummy or not dummyWeapon_ then return end
     if #dummyAttacks_ == 0 then return end
 
-    local player = ctx_.player
+    local player = ctx_.entities.player
     dummyFacingRight_ = player.x > dummy.x
 
     if dummyAttacking_ then
@@ -540,10 +541,10 @@ end
 
 --- 锻造师移动追击
 function Combat.UpdateDummyMovement(dt)
-    local dummy = ctx_.dummy
+    local dummy = ctx_.entities.dummy
     if not dummy then return end
 
-    local player = ctx_.player
+    local player = ctx_.entities.player
     local physScale = ctx_.config.getPhysScale()
     local screenW = ctx_.config.getScreenW()
 
@@ -572,10 +573,10 @@ function Combat.CheckDummyAttackHitPlayer()
     if not dummyAttacking_ or not dummyCurrentAttack_ then return end
     if dummyHitPlayer_ then return end
 
-    local dummy = ctx_.dummy
+    local dummy = ctx_.entities.dummy
     if not dummy then return end
 
-    local player = ctx_.player
+    local player = ctx_.entities.player
     local physScale = ctx_.config.getPhysScale()
     local hitEffects = ctx_.entities.hitEffects
     local materialEffect = ctx_.gameData.getMaterialEffect()
@@ -671,9 +672,9 @@ function Combat.InitDummyWeapon()
         localOffsetX = 0,
         localOffsetY = -0.6,
         angle = -0.3,
-        length = 50,
-        width = 8,
-        force = 12,
+        length = 60,          -- 剑比斧更长
+        width = 5,            -- 剑更窄
+        force = 10,
         forceDir = 1,
         rootX = 0, rootY = 0,
         tipX = 0, tipY = 0,
@@ -683,7 +684,7 @@ end
 --- 更新木桩武器位置
 function Combat.UpdateDummyWeapon(dt)
     if not dummyWeapon_ then return end
-    local dummy = ctx_.dummy
+    local dummy = ctx_.entities.dummy
     if not dummy then return end
 
     local physScale = ctx_.config.getPhysScale()
@@ -739,7 +740,7 @@ end
 function Combat.GetPlayerWeaponCollider(progress)
     if not attacking_ or not currentAttack_ then return nil end
 
-    local player = ctx_.player
+    local player = ctx_.entities.player
     local physScale = ctx_.config.getPhysScale()
     local atk = currentAttack_
     local dir = player.facingRight and 1 or -1
@@ -778,7 +779,7 @@ end
 
 --- 检测武器碰撞（格挡）
 function Combat.CheckWeaponClash(progress)
-    local dummy = ctx_.dummy
+    local dummy = ctx_.entities.dummy
     if not dummyWeapon_ or not dummy then return end
     if not dummyAttacking_ then return end
     if weaponClashCooldown_ > 0 then return end
@@ -788,7 +789,7 @@ function Combat.CheckWeaponClash(progress)
 
     local dw = dummyWeapon_
     local physScale = ctx_.config.getPhysScale()
-    local player = ctx_.player
+    local player = ctx_.entities.player
     local hitEffects = ctx_.entities.hitEffects
     local gameData = ctx_.gameData.getGameData()
 

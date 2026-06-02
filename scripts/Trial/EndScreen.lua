@@ -85,7 +85,7 @@ function EndScreen.PlayEndVideo()
         EndScreen.ShowEndScreen()
     end
 
-    -- 全屏视频 + 跳过按钮
+    -- 全屏视频 + 跳过按钮（禁用点击交互防止循环播放）
     endVideoPlayer_ = Video.VideoPlayer {
         id = "endVideo",
         src = videoPath,
@@ -94,6 +94,7 @@ function EndScreen.PlayEndVideo()
         autoPlay = true,
         loop = false,
         objectFit = "cover",
+        pointerEvents = "none",
         onEnd = onVideoFinished,
     }
 
