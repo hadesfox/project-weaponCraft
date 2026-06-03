@@ -25,6 +25,11 @@ local canvasSize_ = 200
 local canvasAreaPanel_ = nil
 local canvasBoundsReady_ = false
 
+-- GetAbsoluteLayout 缓存（屏幕尺寸不变时复用）
+local cachedLayout_ = nil
+local cachedLayoutW_ = 0
+local cachedLayoutH_ = 0
+
 -- 输入追踪
 local pointerDown_ = false
 
@@ -228,8 +233,18 @@ function DrawState.Update(dt)
     local areaX, areaY, areaW, areaH
     local layoutOK = false
     
+    local dpr = graphics:GetDPR()
+    local logW = graphics:GetWidth() / dpr
+    local logH = graphics:GetHeight() / dpr
+
     if canvasAreaPanel_ then
-        local layout = canvasAreaPanel_:GetAbsoluteLayout()
+        -- 屏幕尺寸变化时刷新缓存
+        if not cachedLayout_ or logW ~= cachedLayoutW_ or logH ~= cachedLayoutH_ then
+            cachedLayout_ = canvasAreaPanel_:GetAbsoluteLayout()
+            cachedLayoutW_ = logW
+            cachedLayoutH_ = logH
+        end
+        local layout = cachedLayout_
         if layout and layout.w > 0 and layout.h > 0 then
             areaX = layout.x
             areaY = layout.y
@@ -238,9 +253,6 @@ function DrawState.Update(dt)
             layoutOK = true
         end
     end
-    
-    local dpr = graphics:GetDPR()
-    local logW = graphics:GetWidth() / dpr
     
     local newX, newY, size
     if layoutOK then

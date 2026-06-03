@@ -11,10 +11,12 @@ local Renderer = {}
 -- 试炼场背景图
 local BG_IMAGE_PATH = "image/kzpncvhk5eq10kyyiudqnhs-20260531125017.png"
 local bgImage_ = nil
+local bgImageFailed_ = false  -- 加载失败标记，避免每帧重试
 
 -- 锻造师贴图（木桩替代）
 local DUMMY_IMAGE_PATH = "image/主角_锻造师_20260530003547.png"
 local dummyImage_ = nil
+local dummyImageFailed_ = false  -- 加载失败标记
 local dummyImageAspect_ = 1.0  -- 图片宽高比 (w/h)
 
 --- 计算突刺攻击长度（纯数学函数，从TrialState提取）
@@ -40,10 +42,12 @@ function Renderer.ReleaseImages(vg)
         nvgDeleteImage(vg, bgImage_)
     end
     bgImage_ = nil
+    bgImageFailed_ = false
     if dummyImage_ and dummyImage_ ~= 0 then
         nvgDeleteImage(vg, dummyImage_)
     end
     dummyImage_ = nil
+    dummyImageFailed_ = false
 end
 
 --- 预加载所有图片资源（在 Enter 时调用，避免渲染时卡顿）
@@ -69,9 +73,13 @@ end
 --- @param vg userdata
 --- @param S table 共享状态表
 function Renderer.RenderBackground(vg, S)
-    -- 已在 Preload 中加载，这里仅做兜底
-    if not bgImage_ then
+    -- 已在 Preload 中加载，这里仅做兜底（失败后不再重试）
+    if not bgImage_ and not bgImageFailed_ then
         bgImage_ = nvgCreateImage(vg, BG_IMAGE_PATH, 0)
+        if not bgImage_ or bgImage_ == 0 then
+            bgImage_ = nil
+            bgImageFailed_ = true
+        end
     end
 
     if bgImage_ and bgImage_ > 0 then
@@ -188,14 +196,17 @@ end
 function Renderer.RenderDummy(vg, S)
     if not S.dummy then return end
 
-    -- 懒加载贴图并获取宽高比
-    if not dummyImage_ then
+    -- 懒加载贴图并获取宽高比（失败后不再重试）
+    if not dummyImage_ and not dummyImageFailed_ then
         dummyImage_ = nvgCreateImage(vg, DUMMY_IMAGE_PATH, 0)
         if dummyImage_ and dummyImage_ ~= 0 then
             local imgW, imgH = nvgImageSize(vg, dummyImage_)
             if imgH and imgH > 0 then
                 dummyImageAspect_ = imgW / imgH
             end
+        else
+            dummyImage_ = nil
+            dummyImageFailed_ = true
         end
     end
 

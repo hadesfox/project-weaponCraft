@@ -101,9 +101,17 @@ function EndScreen.PlayEndVideo()
     local skipBtn = UI.Button {
         text = "跳过 >>",
         size = "small",
-        variant = "outline",
+        variant = "text",
         position = "absolute",
-        right = 20, bottom = 30,
+        right = 20, top = 20,
+        paddingLeft = 14, paddingRight = 14,
+        paddingTop = 8, paddingBottom = 8,
+        backgroundColor = { 0, 0, 0, 100 },
+        borderWidth = 1,
+        borderColor = { 200, 200, 200, 200 },
+        borderRadius = 6,
+        color = { 220, 220, 220, 200 },
+        fontSize = 14,
         onClick = function()
             onVideoFinished()
         end,

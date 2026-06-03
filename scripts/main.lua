@@ -212,6 +212,13 @@ function Intro.Finish()
         introPlayer_:Stop()
         introPlayer_ = nil
     end
+    -- 释放 NanoVG 视频纹理（避免 GPU 泄漏）
+    if introNvgImage_ and introNvgImage_ > 0 then
+        local vg = NVG.Get()
+        if vg then
+            nvgDeleteImage(vg, introNvgImage_)
+        end
+    end
     introNvgImage_ = nil
     introActive_ = false
     introPhase_ = "none"
@@ -899,4 +906,61 @@ function HandleNanoVGRender(eventType, eventData)
     PhaseOverlay.Render(vg)
     nvgResetTransform(vg)
     nvgEndFrame(vg)
+
+    -- 竖屏检测：宽 < 高时全屏覆盖提示旋转
+    local lw = w / dpr
+    local lh = h / dpr
+    if lw < lh then
+        nvgBeginFrame(vg, w, h, 1.0)
+        nvgScale(vg, dpr, dpr)
+        -- 全屏黑色遮罩
+        nvgBeginPath(vg)
+        nvgRect(vg, 0, 0, lw, lh)
+        nvgFillColor(vg, nvgRGBA(15, 15, 20, 245))
+        nvgFill(vg)
+        -- 旋转图标（手机 + 旋转箭头简化表达）
+        local cx, cy = lw / 2, lh / 2 - 30
+        -- 手机矩形（竖向）
+        nvgSave(vg)
+        nvgTranslate(vg, cx, cy)
+        nvgRotate(vg, math.rad(45))  -- 倾斜表示正在旋转
+        nvgBeginPath(vg)
+        nvgRoundedRect(vg, -18, -30, 36, 60, 5)
+        nvgStrokeColor(vg, nvgRGBA(200, 200, 210, 200))
+        nvgStrokeWidth(vg, 2.5)
+        nvgStroke(vg)
+        -- 屏幕内部
+        nvgBeginPath(vg)
+        nvgRoundedRect(vg, -14, -24, 28, 48, 2)
+        nvgFillColor(vg, nvgRGBA(60, 60, 80, 150))
+        nvgFill(vg)
+        nvgRestore(vg)
+        -- 旋转箭头（弧形）
+        nvgBeginPath(vg)
+        nvgArc(vg, cx, cy, 45, math.rad(-60), math.rad(60), 2) -- NVG_CW=2
+        nvgStrokeColor(vg, nvgRGBA(150, 200, 255, 200))
+        nvgStrokeWidth(vg, 2.5)
+        nvgStroke(vg)
+        -- 箭头尖端
+        local arrowX = cx + 45 * math.cos(math.rad(60))
+        local arrowY = cy + 45 * math.sin(math.rad(60))
+        nvgBeginPath(vg)
+        nvgMoveTo(vg, arrowX - 6, arrowY - 8)
+        nvgLineTo(vg, arrowX, arrowY)
+        nvgLineTo(vg, arrowX + 8, arrowY - 4)
+        nvgStrokeColor(vg, nvgRGBA(150, 200, 255, 200))
+        nvgStrokeWidth(vg, 2.5)
+        nvgStroke(vg)
+        -- 提示文字
+        nvgFontFace(vg, "sans")
+        nvgFontSize(vg, 20)
+        nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+        nvgFillColor(vg, nvgRGBA(200, 205, 210, 230))
+        nvgText(vg, lw / 2, lh / 2 + 50, "请将设备旋转至横屏")
+        nvgFontSize(vg, 14)
+        nvgFillColor(vg, nvgRGBA(140, 140, 150, 180))
+        nvgText(vg, lw / 2, lh / 2 + 78, "本游戏仅支持横屏模式")
+        nvgResetTransform(vg)
+        nvgEndFrame(vg)
+    end
 end

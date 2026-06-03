@@ -109,11 +109,28 @@ local FRAME_DURATION = 0.10    -- 每帧持续时间(秒)
 
 -- UI 引用
 local uiRoot_ = nil
+-- HUD 缓存引用（避免每帧 FindById）
+local hudScoreLabel_ = nil
+local hudComboLabel_ = nil
+local hudAttackLabel_ = nil
+local hudTimerLabel_ = nil
+local hudDmgLabel_ = nil
+-- HUD 缓存值（避免不必要的 SetText / format）
+local hudLastTimer_ = -1
+local hudLastDmg_ = -1
+local hudLastScore_ = -1
+local hudLastCombo_ = -1
 
 -- 敌人贴图
 local enemyImage_ = nil
 -- 锻造师武器贴图
 local dummySwordImage_ = nil
+
+-- 渲染状态表（模块级复用，避免每帧 GC 分配）
+local renderState_ = {}
+-- VirtualPad 布局 dirty flag
+local lastLayoutW_ = 0
+local lastLayoutH_ = 0
 
 -- ============================================================================
 -- 试炼场计时与结算系统
@@ -524,6 +541,12 @@ function TrialState.Leave()
     uiRoot_ = nil
     gameData_ = nil
     onComplete_ = nil
+    -- 清除 HUD 缓存
+    hudScoreLabel_ = nil
+    hudComboLabel_ = nil
+    hudAttackLabel_ = nil
+    hudTimerLabel_ = nil
+    hudDmgLabel_ = nil
 end
 
 --- 生成平台（多层复杂布局）
@@ -783,6 +806,16 @@ function TrialState.BuildUI()
             },
         },
     }
+    -- 缓存 HUD 控件引用（避免每帧 FindById）
+    hudScoreLabel_ = uiRoot_:FindById("trialScoreLabel")
+    hudComboLabel_ = uiRoot_:FindById("trialComboLabel")
+    hudAttackLabel_ = uiRoot_:FindById("trialAttackLabel")
+    hudTimerLabel_ = uiRoot_:FindById("trialTimerLabel")
+    hudDmgLabel_ = uiRoot_:FindById("trialDmgLabel")
+    hudLastTimer_ = -1
+    hudLastDmg_ = -1
+    hudLastScore_ = -1
+    hudLastCombo_ = -1
     return uiRoot_
 end
 
@@ -1047,14 +1080,18 @@ UpdateCombo = function(dt)
     end
 end
 
---- 命中特效更新
+--- 命中特效更新（swap-and-pop O(1) 移除）
 UpdateHitEffects = function(dt)
+    local n = #hitEffects_
     local i = 1
-    while i <= #hitEffects_ do
-        hitEffects_[i].timer = hitEffects_[i].timer - dt
-        hitEffects_[i].y = hitEffects_[i].y - dt * 50
-        if hitEffects_[i].timer <= 0 then
-            table.remove(hitEffects_, i)
+    while i <= n do
+        local e = hitEffects_[i]
+        e.timer = e.timer - dt
+        e.y = e.y - dt * 50
+        if e.timer <= 0 then
+            hitEffects_[i] = hitEffects_[n]
+            hitEffects_[n] = nil
+            n = n - 1
         else
             i = i + 1
         end
@@ -1083,38 +1120,43 @@ CheckWaveClear = function()
     SpawnTargets()
 end
 
---- 更新 HUD 标签
+--- 更新 HUD 标签（使用缓存引用 + 脏检查，避免每帧查找和格式化）
 UpdateHUD = function()
     if not uiRoot_ then return end
-    
-    local scoreLabel = uiRoot_:FindById("trialScoreLabel")
-    if scoreLabel then scoreLabel:SetText(tostring(score_)) end
-    
-    local comboLabel = uiRoot_:FindById("trialComboLabel")
-    if comboLabel then
-        comboLabel:SetText(combo_ >= 2 and (combo_ .. "x") or "")
+
+    if hudScoreLabel_ and score_ ~= hudLastScore_ then
+        hudLastScore_ = score_
+        hudScoreLabel_:SetText(tostring(score_))
     end
-    
-    local attackLabel = uiRoot_:FindById("trialAttackLabel")
-    local curAtk = Combat.GetCurrentAttack()
-    if attackLabel and curAtk then
-        attackLabel:SetText("招式: " .. curAtk.name)
+
+    if hudComboLabel_ and combo_ ~= hudLastCombo_ then
+        hudLastCombo_ = combo_
+        hudComboLabel_:SetText(combo_ >= 2 and (combo_ .. "x") or "")
     end
-    
-    -- 倒计时
-    local timerLabel = uiRoot_:FindById("trialTimerLabel")
-    if timerLabel then
-        local remaining = math.max(0, math.ceil(trialTimeLimit_ - trialTimer_))
-        timerLabel:SetText(string.format("%02d", remaining))
-        if remaining <= 10 then
-            timerLabel:SetFontColor({ 240, 80, 80, 255 })
+
+    if hudAttackLabel_ then
+        local curAtk = Combat.GetCurrentAttack()
+        if curAtk then
+            hudAttackLabel_:SetText("招式: " .. curAtk.name)
         end
     end
-    
-    -- 累计伤害
-    local dmgLabel = uiRoot_:FindById("trialDmgLabel")
-    if dmgLabel then
-        dmgLabel:SetText("伤害:" .. trialTotalDamage_)
+
+    -- 倒计时（仅整秒变化时更新）
+    if hudTimerLabel_ then
+        local remaining = math.max(0, math.ceil(trialTimeLimit_ - trialTimer_))
+        if remaining ~= hudLastTimer_ then
+            hudLastTimer_ = remaining
+            hudTimerLabel_:SetText(string.format("%02d", remaining))
+            if remaining <= 10 then
+                hudTimerLabel_:SetFontColor({ 240, 80, 80, 255 })
+            end
+        end
+    end
+
+    -- 累计伤害（仅数值变化时更新）
+    if hudDmgLabel_ and trialTotalDamage_ ~= hudLastDmg_ then
+        hudLastDmg_ = trialTotalDamage_
+        hudDmgLabel_:SetText("伤害:" .. trialTotalDamage_)
     end
 end
 
@@ -1202,53 +1244,44 @@ function TrialState.Render(vg)
         end
     end
     
-    -- 组装渲染状态表
-    local S = {
-        screenW = screenW_,
-        screenH = screenH_,
-        groundY = groundY_,
-        physScale = physScale_,
-        player = player_,
-        platforms = platforms_,
-        targets = targets_,
-        dummy = dummy_,
-        dummyWeapon = Combat.GetDummyWeapon(),
-        dummyAttacking = Combat.IsDummyAttacking(),
-        dummyCurrentAttack = Combat.GetDummyCurrentAttack(),
-        dummyAttackProgress = Combat.GetDummyAttackProgress(),
-        dummyFacingRight = Combat.IsDummyFacingRight(),
-        dummyMoving = Combat.IsDummyMoving(),
-        attacking = Combat.IsAttacking(),
-        currentAttack = Combat.GetCurrentAttack(),
-        attackTimer = Combat.GetAttackTimer(),
-        attackDuration = Combat.GetAttackDuration(),
-        weaponStrokes = weaponStrokes_,
-        hitEffects = hitEffects_,
-        combo = combo_,
-        comboTimer = comboTimer_,
-        transformAnim = transformAnim_,
-        formNames = formNames_,
-        currentForm = currentForm_,
-        gameData = gameData_,
-        enemyImage = enemyImage_,
-        dummySwordImage = dummySwordImage_,
-        targetDefs = targetDefs_,
-        playerImage = playerImage_,
-        playerRunFrames = playerRunFrames_,
-        playerFrameIndex = playerFrameIndex_,
-        weaponClashAnim = Combat.GetWeaponClashAnim(),
-        weaponClashX = 0, -- filled below
-        weaponClashY = 0,
-        -- 弹开状态
-        deflecting = Combat.IsDeflecting(),
-        deflectTimer = 0,
-        deflectDuration = 0.3,
-        deflectStartX = 0, deflectStartY = 0,
-        deflectAngle = 0, deflectSpin = 0,
-        deflectWeaponAngle = 0,
-    }
-    -- 填充多返回值字段（避免重复调用）
+    -- 原地更新渲染状态表（复用模块级 renderState_，避免每帧 GC）
+    local S = renderState_
+    S.screenW = screenW_
+    S.screenH = screenH_
+    S.groundY = groundY_
+    S.physScale = physScale_
+    S.player = player_
+    S.platforms = platforms_
+    S.targets = targets_
+    S.dummy = dummy_
+    S.dummyWeapon = Combat.GetDummyWeapon()
+    S.dummyAttacking = Combat.IsDummyAttacking()
+    S.dummyCurrentAttack = Combat.GetDummyCurrentAttack()
+    S.dummyAttackProgress = Combat.GetDummyAttackProgress()
+    S.dummyFacingRight = Combat.IsDummyFacingRight()
+    S.dummyMoving = Combat.IsDummyMoving()
+    S.attacking = Combat.IsAttacking()
+    S.currentAttack = Combat.GetCurrentAttack()
+    S.attackTimer = Combat.GetAttackTimer()
+    S.attackDuration = Combat.GetAttackDuration()
+    S.weaponStrokes = weaponStrokes_
+    S.hitEffects = hitEffects_
+    S.combo = combo_
+    S.comboTimer = comboTimer_
+    S.transformAnim = transformAnim_
+    S.formNames = formNames_
+    S.currentForm = currentForm_
+    S.gameData = gameData_
+    S.enemyImage = enemyImage_
+    S.dummySwordImage = dummySwordImage_
+    S.targetDefs = targetDefs_
+    S.playerImage = playerImage_
+    S.playerRunFrames = playerRunFrames_
+    S.playerFrameIndex = playerFrameIndex_
+    S.weaponClashAnim = Combat.GetWeaponClashAnim()
     S.weaponClashX, S.weaponClashY = Combat.GetWeaponClashPos()
+    S.deflecting = Combat.IsDeflecting()
+    -- 弹开数据
     local dd = Combat.GetDeflectData()
     if dd then
         S.deflectTimer = dd.timer or 0
@@ -1259,6 +1292,15 @@ function TrialState.Render(vg)
         S.deflectSpin = dd.spin or 0
         S.deflectWeaponAngle = dd.weaponAngle or 0
         S.deflectTarget = dd.target or "player"
+    else
+        S.deflectTimer = 0
+        S.deflectDuration = 0.3
+        S.deflectStartX = 0
+        S.deflectStartY = 0
+        S.deflectAngle = 0
+        S.deflectSpin = 0
+        S.deflectWeaponAngle = 0
+        S.deflectTarget = nil
     end
     
     nvgBeginFrame(vg, w, h, 1.0)
@@ -1302,7 +1344,12 @@ function TrialState.Render(vg)
     
     -- 手机端虚拟操控绘制
     if VirtualPad.IsActive() then
-        VirtualPad.UpdateLayout(screenW_, screenH_)
+        -- 仅屏幕尺寸变化时重算布局
+        if screenW_ ~= lastLayoutW_ or screenH_ ~= lastLayoutH_ then
+            lastLayoutW_ = screenW_
+            lastLayoutH_ = screenH_
+            VirtualPad.UpdateLayout(screenW_, screenH_)
+        end
         VirtualPad.Render(vg)
     end
     

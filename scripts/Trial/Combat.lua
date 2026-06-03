@@ -53,6 +53,10 @@ local deflectSpin_ = 0
 local deflectWeaponAngle_ = 0
 local deflectTarget_ = "player"  -- "player" 或 "dummy"，标识被击飞武器归属
 
+-- 可复用返回 table（避免每帧分配）
+local deflectData_ = {}
+local colliderData_ = {}
+
 -- 攻击开始时间戳（用于判断先后出手）
 local playerAttackStartTime_ = 0
 local dummyAttackStartTime_ = 0
@@ -183,13 +187,16 @@ function Combat.GetDeflectProgress()
     return deflectTimer_ / deflectDuration_
 end
 function Combat.GetDeflectData()
-    return {
-        startX = deflectStartX_, startY = deflectStartY_,
-        angle = deflectAngle_, spin = deflectSpin_,
-        weaponAngle = deflectWeaponAngle_, timer = deflectTimer_,
-        duration = deflectDuration_,
-        target = deflectTarget_,  -- "player" 或 "dummy"
-    }
+    local d = deflectData_
+    d.startX = deflectStartX_
+    d.startY = deflectStartY_
+    d.angle = deflectAngle_
+    d.spin = deflectSpin_
+    d.weaponAngle = deflectWeaponAngle_
+    d.timer = deflectTimer_
+    d.duration = deflectDuration_
+    d.target = deflectTarget_
+    return d
 end
 function Combat.GetWeaponClashAnim() return weaponClashAnim_ end
 function Combat.GetWeaponClashPos() return weaponClashX_, weaponClashY_ end
@@ -782,13 +789,15 @@ function Combat.GetPlayerWeaponCollider(progress)
         tipY = originY + math.sin(currentAngle) * range
     end
 
-    return {
-        rootX = originX, rootY = originY,
-        tipX = tipX, tipY = tipY,
-        width = 12 * physScale,
-        force = atk.knockback or 8,
-        forceDir = dir,
-    }
+    local c = colliderData_
+    c.rootX = originX
+    c.rootY = originY
+    c.tipX = tipX
+    c.tipY = tipY
+    c.width = 12 * physScale
+    c.force = atk.knockback or 8
+    c.forceDir = dir
+    return c
 end
 
 --- 检测武器碰撞（格挡）

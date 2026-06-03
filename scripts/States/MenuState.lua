@@ -23,6 +23,9 @@ local RenderButtons
 local RenderCharacterPanel
 local SplitLines
 
+-- SplitLines 缓存（desc 字符串 → lines 数组）
+local splitLinesCache_ = {}
+
 -- 回调
 local onStartGame_ = nil
 local uiRoot_ = nil
@@ -592,12 +595,15 @@ function RenderCharacterPanel(vg)
 
     nvgRestore(vg)
 end
---- 工具：按换行符拆分字符串
+--- 工具：按换行符拆分字符串（带缓存）
 function SplitLines(str)
+    local cached = splitLinesCache_[str]
+    if cached then return cached end
     local lines = {}
     for line in str:gmatch("([^\n]+)") do
         lines[#lines + 1] = line
     end
+    splitLinesCache_[str] = lines
     return lines
 end
 

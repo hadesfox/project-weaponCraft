@@ -91,6 +91,9 @@ local finishTimer_ = -1      -- <0 表示未激活
 -- 子阶段说明暂停标志：外部显示黑屏说明时暂停所有游戏更新
 local waitingIntro_ = false
 
+-- 渲染状态表（模块级复用，避免每帧 GC 分配）
+local forgeRenderState_ = {}
+
 -- 前向声明内部函数（避免全局泄漏）
 local InitHammerPhase
 local InitQuenchPhase
@@ -929,38 +932,35 @@ function ForgeState.Render(vg)
     nvgFill(vg)
 
     -- 构建状态快照供渲染模块使用
-    local S = {
-        phaseTimer = phaseTimer_,
-        -- 锤击
-        hammerFlash = hammerFlash_,
-        hammerShake = hammerShake_,
-        hammerRhythm = hammerRhythm_,
-        hammerHits = hammerHits_,
-        hammerHitQuality = hammerHitQuality_,
-        hammerReady = hammerReady_,
-        hammerDone = hammerDone_,
-        hammerScore = hammerScore_,
-        hammerWaitClick = hammerWaitClick_,
-        hammerTimeLeft = hammerTimeLeft_,
-        hammerZoneCenter = hammerZoneCenter_,
-        -- 淬火
-        quenchTemp = quenchTemp_,
-        quenchTarget = quenchTarget_,
-        quenchTolerance = quenchTolerance_,
-        quenchHolding = quenchHolding_,
-        quenchDone = quenchDone_,
-        quenchTimer = quenchTimer_,
-        -- 砥砺
-        grindCount = grindCount_,
-        grindKeyIndex = grindKeyIndex_,
-        grindDirection = grindDirection_,
-        grindTimer = grindTimer_,
-        grindDone = grindDone_,
-        grindScore = grindScore_,
-        grindFlash = grindFlash_,
-        grindMissFlash = grindMissFlash_,
-        grindWaitClick = grindWaitClick_,
-    }
+    -- 原地更新渲染状态表（复用模块级表，避免每帧 GC）
+    local S = forgeRenderState_
+    S.phaseTimer = phaseTimer_
+    S.hammerFlash = hammerFlash_
+    S.hammerShake = hammerShake_
+    S.hammerRhythm = hammerRhythm_
+    S.hammerHits = hammerHits_
+    S.hammerHitQuality = hammerHitQuality_
+    S.hammerReady = hammerReady_
+    S.hammerDone = hammerDone_
+    S.hammerScore = hammerScore_
+    S.hammerWaitClick = hammerWaitClick_
+    S.hammerTimeLeft = hammerTimeLeft_
+    S.hammerZoneCenter = hammerZoneCenter_
+    S.quenchTemp = quenchTemp_
+    S.quenchTarget = quenchTarget_
+    S.quenchTolerance = quenchTolerance_
+    S.quenchHolding = quenchHolding_
+    S.quenchDone = quenchDone_
+    S.quenchTimer = quenchTimer_
+    S.grindCount = grindCount_
+    S.grindKeyIndex = grindKeyIndex_
+    S.grindDirection = grindDirection_
+    S.grindTimer = grindTimer_
+    S.grindDone = grindDone_
+    S.grindScore = grindScore_
+    S.grindFlash = grindFlash_
+    S.grindMissFlash = grindMissFlash_
+    S.grindWaitClick = grindWaitClick_
 
     if currentPhase_ == PHASE_HAMMER then
         PhaseRenderers.RenderHammerPhase(vg, lw, lh, S)
