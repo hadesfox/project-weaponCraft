@@ -6,23 +6,9 @@
 --   3. 阶段过渡管理
 -- ============================================================================
 
-local Config = require("Config")
-local NVG = require("NVG")
-
 local PhaseOverlay = {}
 
--- ============================================================================
--- 阶段定义
--- ============================================================================
 -- 阶段编号: 5=绘制, 4=材质, 3=锤击, 2=淬火, 1=砥砺, 0=试炼场
-local PHASE_INFO = {
-    [5] = { title = "阶段五", subtitle = "绘制武器轮廓" },
-    [4] = { title = "阶段四", subtitle = "选材" },
-    [3] = { title = "阶段三", subtitle = "锤击定型" },
-    [2] = { title = "阶段二", subtitle = "淬火淬炼" },
-    [1] = { title = "阶段一", subtitle = "砥砺磨光" },
-    [0] = { title = "试炼", subtitle = "以剑证道" },
-}
 
 -- 音效路径
 local CRACK_SOUNDS = {
@@ -176,9 +162,9 @@ function PhaseOverlay.TransitionTo(targetPhase, onDone, blocking)
     transition_.onDone = onDone
     transition_.soundPlayed = false
     if blocking then
-        transition_.duration = 1.8
-        transition_.fadeInTime = 0.3
-        transition_.fadeOutTime = 0.4
+        transition_.duration = 0.8
+        transition_.fadeInTime = 0.2
+        transition_.fadeOutTime = 0.2
     else
         transition_.duration = 0.6
         transition_.fadeInTime = 0.1
@@ -253,9 +239,6 @@ function PhaseOverlay.Render(vg)
     local lw = w / dpr
     local lh = h / dpr
 
-    local fontId = NVG.GetFont()
-    if fontId == -1 then return end
-
     -- ========================================
     -- 黑屏过渡渲染（阻塞式）
     -- ========================================
@@ -275,29 +258,11 @@ function PhaseOverlay.Render(vg)
         end
         alpha = math.max(0, math.min(1, alpha))
 
-        -- 全屏黑色遮罩
+        -- 全屏黑色遮罩（纯过渡，文字已合并到 PhaseIntro 中显示）
         nvgBeginPath(vg)
         nvgRect(vg, 0, 0, lw, lh)
         nvgFillColor(vg, nvgRGBA(5, 5, 10, math.floor(alpha * 240)))
         nvgFill(vg)
-
-        -- 中间文字
-        if alpha > 0.7 then
-            local info = PHASE_INFO[transition_.phase]
-            if info then
-                local textAlpha = math.floor(math.min(1, (alpha - 0.7) / 0.3) * 255)
-
-                nvgFontFaceId(vg, fontId)
-                nvgFontSize(vg, 36)
-                nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-                nvgFillColor(vg, nvgRGBA(220, 200, 160, textAlpha))
-                nvgText(vg, lw / 2, lh / 2 - 20, info.title, nil)
-
-                nvgFontSize(vg, 16)
-                nvgFillColor(vg, nvgRGBA(180, 180, 190, math.floor(textAlpha * 0.8)))
-                nvgText(vg, lw / 2, lh / 2 + 18, info.subtitle, nil)
-            end
-        end
     end
 end
 

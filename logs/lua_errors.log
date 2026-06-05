@@ -1,4 +1,18 @@
-Lua Errors: 0 | Dir: /workspace/scripts | Time: 2026-06-02 00:15:23
+Lua Errors: 15 | Dir: /workspace/scripts | Time: 2026-06-05 08:41:05
 EmmyLua Types: /workspace/.emmylua
 ---
-✅ No errors
+ERROR | DrawState.lua:187:5 | Cannot assign `table` to `never`. [assign-type-mismatch]
+ERROR | DrawState.lua:195:5 | Cannot assign `table` to `never`. [assign-type-mismatch]
+ERROR | ForgeState.lua:606:5 | Cannot assign `integer` to `never`. [assign-type-mismatch]
+ERROR | ForgeState.lua:607:5 | Cannot assign `integer` to `never`. [assign-type-mismatch]
+ERROR | ForgeState.lua:608:5 | Cannot assign `integer` to `never`. [assign-type-mismatch]
+ERROR | ForgeState.lua:609:5 | Cannot assign `integer` to `never`. [assign-type-mismatch]
+ERROR | ForgeState.lua:610:5 | Cannot assign `integer` to `never`. [assign-type-mismatch]
+ERROR | ForgeState.lua:613:5 | Cannot assign `number` to `never`. [assign-type-mismatch]
+ERROR | ForgeState.lua:618:13 | Cannot assign `table` to `never`. [assign-type-mismatch]
+ERROR | ResultState.lua:99:5 | Cannot assign `{ name = ("破旧的奇物"|"生锈的奇物"|string|"普通的奇物"...), type = never, ... }` to `never`. [assign-type-mismatch]
+ERROR | Combat.lua:852:34 | The current Lua version Lua 5.4 is not accessible; expected Lua 5.1, Lua 5.2, Lua JIT. [access-invisible]
+ERROR | Combat.lua:873:34 | The current Lua version Lua 5.4 is not accessible; expected Lua 5.1, Lua 5.2, Lua JIT. [access-invisible]
+ERROR | Combat.lua:878:13 | Cannot assign `(0.785375|-0.785375)` to `integer`. [assign-type-mismatch]
+ERROR | EndScreen.lua:89:41 | expected `VideoPlayerProps?` but found `{ id = "endVideo", src = nil, width = "100%", height = "100%", ... }`. [param-type-mismatch]
+ERROR | VirtualPad.lua:78:12 | Annotations specify that return value 1 has a type of `boolean`, returning value of type `nil` here instead. [return-type-mismatch]
