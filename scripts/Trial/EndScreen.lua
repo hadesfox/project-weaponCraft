@@ -95,7 +95,7 @@ function EndScreen.PlayEndVideo()
         loop = false,
         objectFit = "cover",
         pointerEvents = "none",
-        onEnd = onVideoFinished,
+        onEnded = onVideoFinished,
     }
 
     local skipBtn = UI.Button {
