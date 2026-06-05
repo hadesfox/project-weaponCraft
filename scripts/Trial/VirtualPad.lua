@@ -75,7 +75,8 @@ end
 ---@param name string
 ---@return boolean
 function VirtualPad.IsPressed(name)
-    return _btnPressed[name] or false
+    if _btnPressed[name] then return true end
+    return false
 end
 
 --- 设置按钮回调

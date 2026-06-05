@@ -13,6 +13,7 @@ local KeyBindings = require("KeyBindings")
 
 local DrawState = {}
 
+---@type table
 local gameData_ = nil
 local onComplete_ = nil
 

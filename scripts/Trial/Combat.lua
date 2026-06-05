@@ -50,7 +50,7 @@ local deflectStartX_ = 0
 local deflectStartY_ = 0
 local deflectAngle_ = 0
 local deflectSpin_ = 0
-local deflectWeaponAngle_ = 0
+local deflectWeaponAngle_ = 0.0
 local deflectTarget_ = "player"  -- "player" 或 "dummy"，标识被击飞武器归属
 
 -- 可复用返回 table（避免每帧分配）
@@ -849,7 +849,7 @@ function Combat.CheckWeaponClash(progress)
             dummy.hitDir = playerWeapon.forceDir
 
             -- 弹飞角度：玩家武器被向玩家方向弹开
-            deflectAngle_ = math.atan2(
+            deflectAngle_ = math.atan(
                 playerWeapon.tipY - weaponClashY_,
                 playerWeapon.tipX - weaponClashX_
             )
@@ -870,7 +870,7 @@ function Combat.CheckWeaponClash(progress)
             player.vx = 0  -- 玩家不被推回
 
             -- 弹飞角度：锻造师武器被向锻造师方向弹开
-            deflectAngle_ = math.atan2(
+            deflectAngle_ = math.atan(
                 dw.tipY - weaponClashY_,
                 dw.tipX - weaponClashX_
             )

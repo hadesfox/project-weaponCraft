@@ -16,6 +16,7 @@ local PENALTY_NAMES = {
     combo_fragile = "连击易断",
 }
 
+---@type table
 local gameData_ = nil
 local onComplete_ = nil
 
@@ -141,6 +142,7 @@ function ResultState.BuildUI()
                 alignItems = "center",
                 children = {
                     -- 品质标签
+                    ---@diagnostic disable-next-line: param-type-mismatch
                     UI.Label {
                         text = "— " .. quality.name .. " —",
                         fontSize = 14,

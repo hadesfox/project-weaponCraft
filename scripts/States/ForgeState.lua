@@ -17,6 +17,7 @@ local C_SUCCESS = Config.Colors.Success
 local C_DANGER  = Config.Colors.Danger
 local C_GOLD     = Config.Colors.Gold
 
+---@type table
 local gameData_ = nil
 local onComplete_ = nil
 
