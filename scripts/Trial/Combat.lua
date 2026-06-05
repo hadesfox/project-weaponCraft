@@ -33,8 +33,8 @@ local dummyAttacks_ = {}
 local dummyMoving_ = false
 local dummyVx_ = 0
 
-local DUMMY_ATTACK_INTERVAL_MIN = 0.15
-local DUMMY_ATTACK_INTERVAL_MAX = 0.35
+local DUMMY_ATTACK_INTERVAL_MIN = 0.4
+local DUMMY_ATTACK_INTERVAL_MAX = 0.8
 
 -- 武器碰撞
 local weaponClashAnim_ = 0

@@ -6,7 +6,7 @@ local Config = {}
 
 -- 游戏标题
 Config.Title = "锻造师"
-Config.Version = "v1.0.12"
+Config.Version = "v1.1.0"
 
 -- 游戏状态枚举
 Config.States = {
@@ -110,10 +110,10 @@ Config.Trial = {
 -- ============================================================================
 Config.Combat = {
     BaseHP = 1000,            -- 敌人基础血量
-    DummyHP = 2500,           -- 锻造师血量
-    DummyMoveSpeed = 120,     -- 锻造师移动速度（px/秒）
+    DummyHP = 3000,           -- 锻造师血量（v1.1.0 提升耐久，奖励持续输出）
+    DummyMoveSpeed = 150,     -- 锻造师移动速度（px/秒，v1.1.0 加快追击）
     DummyChaseRange = 9999,   -- 锻造师追击范围（超出则不追）
-    DummyAttackRange = 70,    -- 锻造师攻击距离（进入后停止移动）
+    DummyAttackRange = 80,    -- 锻造师攻击距离（v1.1.0 扩大，惩罚慢武器）
     HPBarWidth = 50,          -- 血条宽度（基础px，按physScale缩放）
     HPBarHeight = 6,          -- 血条高度
     HPBarOffsetY = -12,       -- 血条在目标头顶的偏移
@@ -148,24 +148,24 @@ Config.Attacks = {
         },
     },
     AXE = {
-        -- 爆发型：慢速高伤，单发毁灭
+        -- 爆发型：慢速高伤，高风险高回报
         {
             name = "劈砍",
-            duration = 0.5,       -- 慢但重
-            range = 80,
-            arc = 90,
-            damage = 320,
-            knockback = 15,
-            startAngle = -45,
+            duration = 0.6,       -- 慢重，有被打断风险
+            range = 70,
+            arc = 75,
+            damage = 280,
+            knockback = 10,
+            startAngle = -37,
         },
         {
             name = "横扫",
-            duration = 0.45,
-            range = 90,
-            arc = 200,            -- 超大范围扫
-            damage = 220,
-            knockback = 20,
-            startAngle = -100,
+            duration = 0.55,
+            range = 75,
+            arc = 160,            -- 宽弧但不再半场AOE
+            damage = 180,
+            knockback = 12,
+            startAngle = -80,
         },
     },
     SPEAR = {
